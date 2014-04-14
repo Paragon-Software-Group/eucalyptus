@@ -62,7 +62,7 @@
 
 package com.eucalyptus.cloud.util;
 
-import com.eucalyptus.compute.common.CloudMetadata;
+import com.eucalyptus.cloud.CloudMetadata;
 
 public class IllegalMetadataAccessException extends MetadataException {
   

@@ -1,5 +1,5 @@
 /*************************************************************************
- * Copyright 2009-2013 Eucalyptus Systems, Inc.
+ * Copyright 2009-2012 Eucalyptus Systems, Inc.
  *
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -19,8 +19,6 @@
  ************************************************************************/
 package com.eucalyptus.reporting.service.ws;
 
-import static com.eucalyptus.auth.principal.TemporaryAccessKey.TemporaryKeyType;
-import java.util.EnumSet;
 import org.jboss.netty.channel.ChannelPipeline;
 import com.eucalyptus.component.annotation.ComponentPart;
 import com.eucalyptus.component.id.Reporting;
@@ -30,10 +28,7 @@ import com.eucalyptus.ws.server.QueryPipeline;
 public class ReportingQueryPipeline extends QueryPipeline {
 
   public ReportingQueryPipeline() {
-    super(
-        "reporting-query-pipeline",
-        "/services/Reporting",
-        EnumSet.allOf( TemporaryKeyType.class ) );
+    super( "reporting-query-pipeline", "/services/Reporting", true );
   }
 
   @Override

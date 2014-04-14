@@ -61,8 +61,8 @@
     NEEDED TO COMPLY WITH ANY SUCH LICENSES OR RIGHTS.
   -->
 
-<binding force-classes="true" add-constructors="true" xmlns:tns="https://iam.amazonaws.com/doc/2010-05-08/" name="iam_amazonaws_com_doc_2010_05_08">
-  <namespace uri="https://iam.amazonaws.com/doc/2010-05-08/" default="elements"/>
+<binding force-classes="true" add-constructors="true" xmlns:tns="http://iam.amazonaws.com/doc/2010-05-08/" name="iam_amazonaws_com_doc_2010_05_08">
+  <namespace uri="http://iam.amazonaws.com/doc/2010-05-08/" default="elements"/>
   <mapping class="com.eucalyptus.auth.euare.EuareMessage" abstract="true">
   </mapping>
   <mapping class="com.eucalyptus.auth.euare.ResponseMetadataType" abstract="true">
@@ -653,7 +653,6 @@
     <value name="UserName" field="userName" usage="required"/>
     <value name="UserId" field="userId" usage="required"/>
     <value name="Arn" field="arn" usage="required"/>
-    <value name="CreateDate" field="createDate" usage="required"/>
     <value name="Enabled" field="enabled" usage="optional"/>
     <value name="RegStatus" field="regStatus" usage="optional"/>
     <value name="PasswordExpiration" field="passwordExpiration" usage="optional"/>
@@ -676,7 +675,6 @@
     <value name="GroupName" field="groupName" usage="required"/>
     <value name="GroupId" field="groupId" usage="required"/>
     <value name="Arn" field="arn" usage="required"/>
-    <value name="CreateDate" field="createDate" usage="required"/>
   </mapping>
   <mapping class="com.eucalyptus.auth.euare.UserListTypeType" abstract="true">
     <collection field="memberList">
@@ -1164,48 +1162,5 @@
     <collection field="member">
       <structure name="member" type="com.eucalyptus.auth.euare.InstanceProfileType"/>
     </collection>
-  </mapping>
-  <mapping name="SignCertificate" class="com.eucalyptus.auth.euare.SignCertificateType" extends="com.eucalyptus.auth.euare.EuareMessage">
-    <structure map-as="com.eucalyptus.auth.euare.EuareMessage"/>
-    <value name="Certificate" field="certificate" usage="required"/>
-  </mapping>
-  <mapping name="SignCertificateResponse" class="com.eucalyptus.auth.euare.SignCertificateResponseType" extends="com.eucalyptus.auth.euare.EuareMessage">
-    <structure map-as="com.eucalyptus.auth.euare.EuareMessage"/>
-    <structure field="signCertificateResult" usage="required" map-as="com.eucalyptus.auth.euare.SignCertificateResultType"/>
-    <structure name="ResponseMetadata" field="responseMetadata" usage="required" type="com.eucalyptus.auth.euare.ResponseMetadataType"/>
-  </mapping>
-  <mapping name="SignCertificateResult" class="com.eucalyptus.auth.euare.SignCertificateResultType">
-    <value name="Certificate" field="certificate" usage="required"/>
-    <value name="Signature" field="signature" usage="required"/>
-  </mapping>
-  <mapping name="DownloadServerCertificate" class="com.eucalyptus.auth.euare.DownloadServerCertificateType" extends="com.eucalyptus.auth.euare.EuareMessage">
-    <structure map-as="com.eucalyptus.auth.euare.EuareMessage"/>
-    <value name="CertificateArn" field="certificateArn" usage="required"/>
-    <value name="DelegationCertificate" field="delegationCertificate" usage="required"/>
-    <value name="AuthSignature" field="authSignature" usage="required"/>
-    <value name="Timestamp" field="timestamp" usage="optional"/>
-    <value name="Signature" field="signature" usage="optional"/>
-  </mapping>
-  <mapping name="DownloadServerCertificateResponse" class="com.eucalyptus.auth.euare.DownloadServerCertificateResponseType" extends="com.eucalyptus.auth.euare.EuareMessage">
-    <structure map-as="com.eucalyptus.auth.euare.EuareMessage"/>
-    <structure field="downloadServerCertificateResult" usage="required" map-as="com.eucalyptus.auth.euare.DownloadServerCertificateResultType"/>
-    <structure name="ResponseMetadata" field="responseMetadata" usage="required" type="com.eucalyptus.auth.euare.ResponseMetadataType"/>
-  </mapping>
-  <mapping name="DownloadServerCertificateResult" class="com.eucalyptus.auth.euare.DownloadServerCertificateResultType">
-    <value name="CertificateArn" field="certificateArn" usage="required" />
-    <value name="ServerCertificate" field="serverCertificate" usage="required" />
-    <value name="ServerPk" field="serverPk" usage="required" />
-    <value name="Signature" field="signature" usage="optional" />
-  </mapping>
-  <mapping name="DownloadCloudCertificate" class="com.eucalyptus.auth.euare.DownloadCloudCertificateType" extends="com.eucalyptus.auth.euare.EuareMessage">
-    <structure map-as="com.eucalyptus.auth.euare.EuareMessage"/>
-  </mapping>
-  <mapping name="DownloadCloudCertificateResponse" class="com.eucalyptus.auth.euare.DownloadCloudCertificateResponseType" extends="com.eucalyptus.auth.euare.EuareMessage">
-    <structure map-as="com.eucalyptus.auth.euare.EuareMessage"/>
-    <structure field="downloadCloudCertificateResult" usage="required" map-as="com.eucalyptus.auth.euare.DownloadCloudCertificateResultType"/>
-    <structure name="ResponseMetadata" field="responseMetadata" usage="required" type="com.eucalyptus.auth.euare.ResponseMetadataType"/>
-  </mapping>
-  <mapping name="DownloadCloudCertificateResult" class="com.eucalyptus.auth.euare.DownloadCloudCertificateResultType">
-    <value name="CloudCertificate" field="cloudCertificate" usage="required" />
   </mapping>
 </binding>

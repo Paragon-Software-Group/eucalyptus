@@ -1,5 +1,5 @@
 /*************************************************************************
- * Copyright 2009-2014 Eucalyptus Systems, Inc.
+ * Copyright 2009-2013 Eucalyptus Systems, Inc.
  *
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -67,13 +67,10 @@ import java.util.ArrayList;
 import java.util.Date;
 import java.util.List;
 import java.util.Map;
-import java.util.NoSuchElementException;
 import java.util.Set;
-
 import com.eucalyptus.auth.Accounts;
 import com.eucalyptus.auth.AuthException;
 import com.eucalyptus.auth.PolicyParseException;
-import com.eucalyptus.auth.ServerCertificate;
 import com.eucalyptus.component.auth.SystemCredentials;
 import com.eucalyptus.component.id.Eucalyptus;
 import com.eucalyptus.crypto.util.B64;
@@ -158,12 +155,7 @@ public class Principals {
                                                 public String getPath( ) {
                                                   return "/";
                                                 }
-
-                                                @Override
-                                                public Date getCreateDate( ) {
-                                                  return null;
-                                                }
-
+                                                
                                                 @Override
                                                 public User.RegistrationStatus getRegistrationStatus( ) {
                                                   return null;
@@ -238,12 +230,7 @@ public class Principals {
                                                 public List<Group> getGroups( ) throws AuthException {
                                                   return Lists.newArrayList( );
                                                 }
-
-                                                @Override
-                                                public String getAccountNumber() throws AuthException {
-                                                  return getAccount().getAccountNumber();
-                                                }
-
+                                                
                                                 @Override
                                                 public Account getAccount( ) throws AuthException {
                                                   return systemAccount( );
@@ -253,12 +240,7 @@ public class Principals {
                                                 public boolean isSystemAdmin( ) {
                                                   return true;
                                                 }
-
-                                                @Override
-                                                public boolean isSystemUser( ) {
-                                                  return true;
-                                                }
-
+                                                                                                
                                                 @Override
                                                 public boolean isAccountAdmin( ) {
                                                   return true;
@@ -273,12 +255,7 @@ public class Principals {
                                                 public Policy addPolicy( String name, String policy ) throws AuthException, PolicyParseException {
                                                   return null;
                                                 }
-
-                                                @Override
-                                                public Policy putPolicy( final String name, final String policy ) throws AuthException, PolicyParseException {
-                                                  return null;
-                                                }
-
+                                                
                                                 @Override
                                                 public List<Authorization> lookupAuthorizations( String resourceType ) throws AuthException {
                                                   return Lists.newArrayList( );
@@ -315,6 +292,9 @@ public class Principals {
                                                 
                                                 @Override
                                                 public void setPassword( String password ) throws AuthException {}
+                                                
+                                                @Override
+                                                public void createPassword( ) throws AuthException {}
                                                 
                                                 @Override
                                                 public void setPasswordExpires( Long time ) throws AuthException {}
@@ -408,12 +388,7 @@ public class Principals {
                                                 public String getPath( ) {
                                                   return "/";
                                                 }
-
-                                                @Override
-                                                public Date getCreateDate( ) {
-                                                  return null;
-                                                }
-
+                                                
                                                 @Override
                                                 public User.RegistrationStatus getRegistrationStatus( ) {
                                                   return null;
@@ -488,12 +463,7 @@ public class Principals {
                                                 public List<Group> getGroups( ) throws AuthException {
                                                   return Lists.newArrayList( );
                                                 }
-
-                                                @Override
-                                                public String getAccountNumber() throws AuthException {
-                                                  return getAccount().getAccountNumber();
-                                                }
-
+                                                
                                                 @Override
                                                 public Account getAccount( ) throws AuthException {
                                                   return NOBODY_ACCOUNT;
@@ -503,12 +473,7 @@ public class Principals {
                                                 public boolean isSystemAdmin( ) {
                                                   return false;
                                                 }
-
-                                                @Override
-                                                public boolean isSystemUser( ) {
-                                                  return false;
-                                                }
-
+                                                
                                                 @Override
                                                 public boolean isAccountAdmin( ) {
                                                   return false;
@@ -523,12 +488,7 @@ public class Principals {
                                                 public Policy addPolicy( String name, String policy ) throws AuthException, PolicyParseException {
                                                   return null;
                                                 }
-
-                                                @Override
-                                                public Policy putPolicy( final String name, final String policy ) throws AuthException, PolicyParseException {
-                                                  return null;
-                                                }
-
+                                                
                                                 @Override
                                                 public List<Authorization> lookupAuthorizations( String resourceType ) throws AuthException {
                                                   return Lists.newArrayList( );
@@ -565,6 +525,9 @@ public class Principals {
                                                 
                                                 @Override
                                                 public void setPassword( String password ) throws AuthException {}
+                                                
+                                                @Override
+                                                public void createPassword( ) throws AuthException {}
                                                 
                                                 @Override
                                                 public void setPasswordExpires( Long time ) throws AuthException {}
@@ -774,36 +737,6 @@ public class Principals {
     @Override
     public List<Authorization> lookupAccountGlobalQuotas( String resourceType ) throws AuthException {
       return Lists.newArrayList( );
-    }
-
-    @Override
-    public ServerCertificate addServerCertificate(String certName,
-        String certBody, String certChain, String path, String pk)
-        throws AuthException {
-      throw new AuthException( AuthException.SYSTEM_MODIFICATION );
-    }
-
-    @Override
-    public ServerCertificate deleteServerCertificate(String certName)
-        throws AuthException {
-      throw new AuthException( AuthException.SYSTEM_MODIFICATION );
-    }
-
-    @Override
-    public ServerCertificate lookupServerCertificate(String certName)
-        throws AuthException {
-      throw new AuthException( AuthException.SYSTEM_MODIFICATION );
-    }
-
-    @Override
-    public List<ServerCertificate> listServerCertificates(String pathPrefix)
-        throws AuthException {
-      throw new AuthException( AuthException.SYSTEM_MODIFICATION );
-    }
-    
-    @Override
-    public void updateServerCeritificate(String certName, String newCertName, String newPath) throws AuthException    {
-      throw new AuthException( AuthException.SYSTEM_MODIFICATION );
     }
   }
 }

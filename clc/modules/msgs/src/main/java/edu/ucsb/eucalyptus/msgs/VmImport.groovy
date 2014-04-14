@@ -66,22 +66,13 @@
 @GroovyAddClassUUID
 package edu.ucsb.eucalyptus.msgs;
 
-import net.sf.json.JSONObject;
-import net.sf.json.JSONArray;
-
+import groovy.transform.TypeChecked;
+import java.math.BigInteger;
+import java.util.ArrayList;
 import com.eucalyptus.binding.HttpParameterMapping;
 import com.eucalyptus.binding.HttpEmbedded;
 
 public class VmImportMessage extends EucalyptusMessage {
-  @Override
-  public <TYPE extends BaseMessage> TYPE getReply( ) {
-    VmImportResponseMessage reply = (VmImportResponseMessage) super.getReply( );
-    reply.requestId = this.getCorrelationId( );
-    return (TYPE) reply;
-  }
-}
-public class VmImportResponseMessage extends VmImportMessage {
-  protected String requestId;
 }
 /*********************************************************************************/
 public class ImportInstanceType extends VmImportMessage {
@@ -93,8 +84,15 @@ public class ImportInstanceType extends VmImportMessage {
   Boolean keepPartialImports;
   String platform;
   public ImportInstance() {}
+  @Override
+  public <TYPE extends BaseMessage> TYPE getReply( ) {
+    TYPE reply = super.getReply( );
+    reply.requestId = this.getCorrelationId( );
+    return reply;
+  }  
 }
-public class ImportInstanceResponseType extends VmImportResponseMessage {
+public class ImportInstanceResponseType extends VmImportMessage {
+  String requestId;
   ConversionTask conversionTask;
   public ImportInstanceResponse() {}
 }
@@ -103,7 +101,6 @@ public class ImportInstanceLaunchSpecification extends EucalyptusData {
   @HttpEmbedded(multiple = true)
   @HttpParameterMapping (parameter = "SecurityGroup")
   ArrayList<ImportInstanceGroup> groupSet = new ArrayList<ImportInstanceGroup>();
-  @HttpEmbedded
   UserData userData;
   String instanceType;
   InstancePlacement placement;
@@ -125,10 +122,9 @@ public class DiskImage extends EucalyptusData {
   public DiskImage() {}
 }
 public class UserData extends EucalyptusData {
-  @HttpParameterMapping( parameter="UserData" )
   String data;
-  String version = "1.0"
-  String encoding = "base64"
+  String version;
+  String encoding;
   public UserData() {}
 }
 public class InstancePlacement extends EucalyptusData {
@@ -145,8 +141,15 @@ public class DescribeConversionTasksType extends VmImportMessage {
   @HttpParameterMapping (parameter = "ConversionTaskId")
   ArrayList<String> conversionTaskIdSet = new ArrayList<String>();
   public DescribeConversionTasks() {}
+  @Override
+  public <TYPE extends BaseMessage> TYPE getReply( ) {
+    TYPE reply = super.getReply( );
+    reply.requestId = this.getCorrelationId( );
+    return reply;
+  }  
 }
-public class DescribeConversionTasksResponseType extends VmImportResponseMessage {
+public class DescribeConversionTasksResponseType extends VmImportMessage {
+  String requestId;
   ArrayList<ConversionTask> conversionTasks = new ArrayList<ConversionTask>();
   public DescribeConversionTasksResponse() {}
 }
@@ -157,8 +160,15 @@ public class ImportVolumeType extends VmImportMessage {
   String description;
   DiskImageVolume volume;
   public ImportVolume() {}
+  @Override
+  public <TYPE extends BaseMessage> TYPE getReply( ) {
+    TYPE reply = super.getReply( );
+    reply.requestId = this.getCorrelationId( );
+    return reply;
+  }  
 }
-public class ImportVolumeResponseType extends VmImportResponseMessage {
+public class ImportVolumeResponseType extends VmImportMessage {
+  String requestId;
   ConversionTask conversionTask;
   public ImportVolumeResponse() {}
 }
@@ -169,19 +179,38 @@ public class DiskImageDetail extends EucalyptusData {
   public DiskImageDetail() {}
 }
 public class DiskImageVolume extends EucalyptusData {
-  Integer size;
+  BigInteger size;
   public DiskImageVolume() {}
 }
 /*********************************************************************************/
 public class CancelConversionTaskType extends VmImportMessage {
   String conversionTaskId;
   public CancelConversionTask() {}
+  @Override
+  public <TYPE extends BaseMessage> TYPE getReply( ) {
+    TYPE reply = super.getReply( );
+    reply.requestId = this.getCorrelationId( );
+    return reply;
+  }  
 }
-public class CancelConversionTaskResponseType extends VmImportResponseMessage {
+public class CancelConversionTaskResponseType extends VmImportMessage {
+  String requestId;
   Boolean _return;
   public CancelConversionTaskResponse() {}
 }
 /*********************************************************************************/
+public class ConversionTask extends EucalyptusData {
+  String conversionTaskId;
+  String expirationTime;
+  ImportVolumeTaskDetails importVolume;
+  ImportInstanceTaskDetails importInstance;
+  String state;
+  String statusMessage;
+  @HttpEmbedded(multiple = true)
+  @HttpParameterMapping (parameter = "ResourceTag")
+  ArrayList<ImportResourceTag> resourceTagSet = new ArrayList<ImportResourceTag>();
+  public ConversionTask() {}
+}
 public class ImportResourceTag extends EucalyptusData {
   String key;
   String value;
@@ -190,69 +219,7 @@ public class ImportResourceTag extends EucalyptusData {
     this.key = key;
     this.value = value;
   }
-  JSONObject toJSON() {
-    JSONObject obj = new JSONObject();
-    obj.put("key", key);
-    obj.put("value", value);
-    return obj;
-  }
-  ImportResourceTag(JSONObject obj) {
-	key = obj.optString("key");
-	value = obj.optString("value");
-  }
 }
-
-public class ConversionTask extends EucalyptusData {
-  String conversionTaskId;
-  String expirationTime;
-  ImportVolumeTaskDetails importVolume;
-  ImportInstanceTaskDetails importInstance;
-  String state;
-  String statusMessage;
-  
-  @HttpEmbedded(multiple = true)
-  @HttpParameterMapping (parameter = "ResourceTag")
-  ArrayList<ImportResourceTag> resourceTagSet = new ArrayList<ImportResourceTag>();
-  public ConversionTask() {}
-  public ConversionTask(JSONObject obj) {
-    conversionTaskId = obj.optString("conversionTaskId");
-    expirationTime = obj.optString("expirationTime");
-    JSONObject importDetails = obj.optJSONObject("importVolume");
-    if (importDetails != null)
-      importVolume = new ImportVolumeTaskDetails(importDetails);
-    importDetails = obj.optJSONObject("importInstance");
-    if (importDetails != null)
-      importInstance = new ImportInstanceTaskDetails(importDetails);
-    state = obj.optString("state", null);
-    statusMessage = obj.optString("statusMessage", null);
-    JSONArray arr = obj.optJSONArray("resourceTagSet");
-    if (arr != null) {
-      for(int i=0;i<arr.size(); i++)
-        resourceTagSet.add(new ImportResourceTag(arr.getJSONObject(i)));
-    } else {
-      JSONObject res = obj.optJSONObject("resourceTagSet");
-      if (res!=null)
-        resourceTagSet.add(new ImportResourceTag(res));
-    }
-  }
-    
-  @Override
-  JSONObject toJSON() {
-    JSONObject obj = new JSONObject();
-    obj.put("conversionTaskId", conversionTaskId);
-    obj.put("expirationTime", expirationTime);
-	if (importVolume != null)
-      obj.put("importVolume", importVolume.toJSON())
-	if (importInstance != null)
-      obj.put("importInstance", importInstance.toJSON())
-    obj.put("state", state);
-    obj.put("statusMessage", statusMessage);
-    for(ImportResourceTag tag:resourceTagSet)
-      obj.accumulate("resourceTagSet", tag.toJSON());
-    return obj;
-  }
-}
-
 public class ImportVolumeTaskDetails extends EucalyptusData {
   Long bytesConverted;
   String availabilityZone;
@@ -260,32 +227,7 @@ public class ImportVolumeTaskDetails extends EucalyptusData {
   DiskImageDescription image;
   DiskImageVolumeDescription volume;
   public ImportVolumeTaskDetails() {}
-  JSONObject toJSON() {
-    JSONObject obj = new JSONObject();
-    obj.put("bytesConverted", bytesConverted);
-    obj.put("availabilityZone", availabilityZone);
-    obj.put("description", description);
-	if (image != null)
-      obj.put("image", image.toJSON());
-	if (volume != null)
-      obj.put("volume", volume.toJSON());
-    return obj;
-  }
-  public ImportVolumeTaskDetails(JSONObject obj) {
-    if (obj != null) {
-	  bytesConverted = obj.optLong("bytesConverted");
-	  availabilityZone = obj.optString("availabilityZone", null);
-	  description = obj.optString("description", null);
-	  JSONObject diskDescription = obj.optJSONObject("image");
-	  if (diskDescription != null)
-		image = new DiskImageDescription(diskDescription);
-	  diskDescription = obj.optJSONObject("volume");
-	  if (diskDescription != null)
-		volume = new DiskImageVolumeDescription(diskDescription);
-    }
-  }
 }
-
 public class ImportInstanceTaskDetails extends EucalyptusData {
   @HttpEmbedded(multiple = true)
   @HttpParameterMapping (parameter = "Volume")
@@ -300,33 +242,7 @@ public class ImportInstanceTaskDetails extends EucalyptusData {
     this.platform = platform;
     this.description = description;
   }
-  JSONObject toJSON() {
-    JSONObject obj = new JSONObject();
-	for(ImportInstanceVolumeDetail vol:volumes)
-      obj.accumulate("volumes", vol.toJSON());
-    obj.put("instanceId", instanceId);
-    obj.put("platform", platform);
-	obj.put("description", description);
-    return obj;
-  }
-  public ImportInstanceTaskDetails(JSONObject obj) {
-    if (obj != null){
-	  description = obj.optString("description", null);
-	  instanceId = obj.optString("instanceId", null);
-	  platform = obj.optString("platform", null);
-	  JSONArray arr = obj.optJSONArray("volumes");
-	  if (arr != null) {
-	    for(int i=0;i<arr.size(); i++)
-		  volumes.add(new ImportInstanceVolumeDetail(arr.getJSONObject(i)));
-	  } else {
-	    JSONObject vol = obj.optJSONObject("volumes");
-		if (vol!=null)
-		  volumes.add(new ImportInstanceVolumeDetail(vol));
-	  }
-    }
-  }
 }
-
 public class ImportInstanceVolumeDetail extends EucalyptusData {
   Long bytesConverted;
   String availabilityZone;
@@ -335,9 +251,8 @@ public class ImportInstanceVolumeDetail extends EucalyptusData {
   DiskImageVolumeDescription volume;
   String status;
   String statusMessage;
-  public ImportInstanceVolumeDetail() {}
-  public ImportInstanceVolumeDetail( String status, String statusMessage, Long bytesConverted, String availabilityZone, 
-      String description, DiskImageDescription image, DiskImageVolumeDescription volume) {
+  public ImportInstanceVolumeDetailItem() {}
+  public ImportInstanceVolumeDetail( String status, String statusMessage, Long bytesConverted, String availabilityZone, String description, DiskImageDescription image, DiskImageVolumeDescription volume ) {
     this.bytesConverted = bytesConverted;
     this.availabilityZone = availabilityZone;
     this.description = description;
@@ -346,34 +261,7 @@ public class ImportInstanceVolumeDetail extends EucalyptusData {
     this.image = image;
     this.volume = volume;
   }
-  JSONObject toJSON() {
-    JSONObject obj = new JSONObject();
-    obj.put("bytesConverted", bytesConverted);
-    obj.put("availabilityZone", availabilityZone);
-	obj.put("image", image.toJSON());
-	obj.put("description", description);
-	obj.put("volume", volume.toJSON());
-	obj.put("status", status);
-	obj.put("statusMessage", statusMessage);
-    return obj;
-  }
-  public ImportInstanceVolumeDetail(JSONObject obj) {
-    if (obj != null){
-	  bytesConverted = obj.optLong("bytesConverted");
-	  availabilityZone = obj.optString("availabilityZone", null);
-	  description = obj.optString("description", null);
-	  JSONObject diskDescription = obj.optJSONObject("image");
-	  if (diskDescription != null)
-		image = new DiskImageDescription(diskDescription);
-	  diskDescription = obj.optJSONObject("volume");
-	  if (diskDescription != null)
-		volume = new DiskImageVolumeDescription(diskDescription);
-	  status = obj.optString("status", null);
-	  statusMessage = obj.optString("statusMessage", null);
-    }
-  }
 }
-
 public class DiskImageDescription extends EucalyptusData {
   String format;
   Long size;
@@ -386,42 +274,13 @@ public class DiskImageDescription extends EucalyptusData {
     this.importManifestUrl = importManifestUrl;
     this.checksum = checksum;
   }
-  JSONObject toJSON() {
-    JSONObject obj = new JSONObject();
-    obj.put("format", format);
-    obj.put("size", size);
-    obj.put("importManifestUrl", importManifestUrl);
-    obj.put("checksum", checksum);
-    return obj;
-  }
-  public DiskImageDescription(JSONObject obj) {
-    if (obj != null) {
-      format = obj.optString("format", null);
-	  size = obj.optLong("size");
-	  importManifestUrl = obj.optString("importManifestUrl", null);
-	  checksum = obj.optString("checksum", null);
-    }
-  }
 }
-
 public class DiskImageVolumeDescription extends EucalyptusData {
-  Integer size;
+  BigInteger size;
   String id;
   public DiskImageVolumeDescription() {}
-  public DiskImageVolumeDescription( Integer size, String id ) {
+  public DiskImageVolumeDescription( BigInteger size, String id ) {
     this.size = size;
     this.id = id;
-  }
-  JSONObject toJSON() {
-    JSONObject obj = new JSONObject();
-    obj.put("size", size);
-    obj.put("id", id);
-    return obj;
-  }
-  public DiskImageVolumeDescription(JSONObject obj) {
-    if (obj != null) {
-	  size = obj.optInt("size");
-	  id = obj.optString("id", null);
-    }
   }
 }

@@ -1,5 +1,5 @@
 /*************************************************************************
- * Copyright 2009-2014 Eucalyptus Systems, Inc.
+ * Copyright 2009-2013 Eucalyptus Systems, Inc.
  *
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -62,23 +62,14 @@
 
 package com.eucalyptus.auth.policy;
 
-import static org.hamcrest.Matchers.notNullValue;
 import static com.eucalyptus.auth.principal.Principal.PrincipalType;
-import static com.eucalyptus.util.Parameters.checkParam;
-
-import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.regex.Pattern;
-
 import javax.annotation.Nonnull;
 import javax.annotation.Nullable;
-
 import org.apache.log4j.Logger;
-
-import com.eucalyptus.auth.Accounts;
-import com.eucalyptus.auth.AuthEvaluationContext;
 import com.eucalyptus.auth.AuthException;
 import com.eucalyptus.auth.Contract;
 import com.eucalyptus.auth.api.PolicyEngine;
@@ -101,12 +92,8 @@ import com.eucalyptus.auth.principal.Principal;
 import com.eucalyptus.auth.principal.User;
 import com.eucalyptus.auth.principal.Authorization.EffectType;
 import com.eucalyptus.auth.principal.User.RegistrationStatus;
-import com.eucalyptus.util.Exceptions;
 import com.google.common.base.Function;
-import com.google.common.base.Supplier;
-import com.google.common.base.Suppliers;
 import com.google.common.collect.ImmutableList;
-import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.ImmutableSet;
 import com.google.common.collect.Iterables;
 import com.google.common.collect.Lists;
@@ -117,10 +104,7 @@ import com.google.common.collect.Lists;
 public class PolicyEngineImpl implements PolicyEngine {
   
   private static final Logger LOG = Logger.getLogger( PolicyEngineImpl.class );
-
-  @Nonnull
-  private final Function<String,String> accountResolver;
-
+  
   private enum Decision {
     DEFAULT, // no match
     DENY,    // explicit deny
@@ -152,34 +136,9 @@ public class PolicyEngineImpl implements PolicyEngine {
     }
   };
   
-  private static final Matcher SERVER_CERTIFICATE_MATCHER = new Matcher( ) {
-    @Override
-    public boolean match( String pattern, String instance ) {
-      if(pattern==null)
-        return false;
-      // instance is in full ARN form while pattern is /{cert_name};
-      if(! instance.startsWith("arn:aws:iam::"))
-        return false;
-      
-      int idx = instance.indexOf(":server-certificate");
-      if(idx<0)
-        return false;
-      idx = idx + ":server-certificate".length();
-      if(idx>=instance.length())
-        return false;
-
-      final String certPathAndName = instance.substring(idx);
-      return Pattern.matches( pattern, certPathAndName );
-    }
-  };
-  
   public PolicyEngineImpl( ) {
-    this( DefaultAccountResolver.INSTANCE );
   }
-
-  public PolicyEngineImpl( @Nonnull final Function<String,String> accountResolver ) {
-    this.accountResolver = checkParam( "accountResolver", accountResolver, notNullValue( ) );
-  }
+  
 
   /*
    * The authorization evaluation algorithm is a combination of AWS IAM policy evaluation logic and
@@ -202,13 +161,12 @@ public class PolicyEngineImpl implements PolicyEngine {
    * @see com.eucalyptus.auth.api.PolicyEngine#evaluateAuthorization(java.lang.Class, java.lang.String, java.lang.String)
    */
   @Override
-  public void evaluateAuthorization( @Nonnull  final AuthEvaluationContext context,
-                                     @Nonnull  final AuthorizationMatch authorizationMatch,
+  public void evaluateAuthorization( @Nonnull  final EvaluationContext context,
                                      @Nullable final String resourceAccountNumber,
                                      @Nonnull  final String resourceName,
                                      @Nonnull  final Map<Contract.Type, Contract> contracts ) throws AuthException {
     try {
-      if ( Decision.ALLOW != evaluateResourceAuthorization( context, authorizationMatch, resourceAccountNumber, resourceName, contracts ) ) {
+      if ( Decision.ALLOW != evaluateResourceAuthorization( context, resourceAccountNumber, resourceName, contracts ) ) {
         throw new AuthException( AuthException.ACCESS_DENIED );
       }
       // Allowed
@@ -220,15 +178,15 @@ public class PolicyEngineImpl implements PolicyEngine {
   }
 
   @Override
-  public void evaluateAuthorization( @Nonnull  final AuthEvaluationContext context,
+  public void evaluateAuthorization( @Nonnull  final EvaluationContext context,
                                      @Nullable final Policy resourcePolicy,
                                      @Nullable final String resourceAccountNumber,
                                      @Nonnull  final String resourceName,
                                      @Nonnull  final Map<Contract.Type, Contract> contracts ) throws AuthException {
     try {
-      final AuthEvaluationContextImpl evaluationContext = (AuthEvaluationContextImpl)context;
+      final EvaluationContextImpl evaluationContext = (EvaluationContextImpl)context;
       final ContractKeyEvaluator contractEval = new ContractKeyEvaluator( contracts );
-      final CachedKeyEvaluator keyEval = new CachedKeyEvaluator( context.getEvaluatedKeys( ) );
+      final CachedKeyEvaluator keyEval = new CachedKeyEvaluator( );
       final String action = evaluationContext.getAction( );
       final User requestUser = evaluationContext.getRequestUser( );
 
@@ -245,13 +203,13 @@ public class PolicyEngineImpl implements PolicyEngine {
           // Check resource authorizations
           Decision decision = resourcePolicy == null ?
               Decision.ALLOW :
-              processAuthorizations( resourcePolicy.getAuthorizations(), AuthorizationMatch.All, action, null, null, evaluationContext.getPrincipalType(), evaluationContext.getPrincipalName(), keyEval, contractEval );
+              processAuthorizations( resourcePolicy.getAuthorizations(), action, null, evaluationContext.getPrincipalType(), evaluationContext.getPrincipalName(), keyEval, contractEval );
           // Denied by explicit or default deny
           if ( decision != Decision.ALLOW ) {
             LOG.debug( "Request is rejected by resource authorization check, due to decision " + decision );
             throw new AuthException( AuthException.ACCESS_DENIED );
           } else {
-            decision = evaluateResourceAuthorization( evaluationContext, AuthorizationMatch.All, resourceAccountNumber, resourceName, contracts );
+            decision = evaluateResourceAuthorization( evaluationContext, resourceAccountNumber, resourceName, contracts );
             if ( Decision.DENY == decision || ( Decision.ALLOW != decision && resourcePolicy == null ) ) {
               throw new AuthException( AuthException.ACCESS_DENIED );
             }
@@ -277,11 +235,11 @@ public class PolicyEngineImpl implements PolicyEngine {
   * @see com.eucalyptus.auth.api.PolicyEngine#evaluateQuota(java.lang.Integer, java.lang.Class, java.lang.String)
   */
   @Override
-  public void evaluateQuota( @Nonnull final AuthEvaluationContext context,
+  public void evaluateQuota( @Nonnull final EvaluationContext context,
                              @Nonnull       String resourceName,
                              @Nonnull final Long quantity ) throws AuthException {
     try {
-      final AuthEvaluationContextImpl evaluationContext = (AuthEvaluationContextImpl)context;
+      final EvaluationContextImpl evaluationContext = (EvaluationContextImpl)context;
 
       User requestUser = context.getRequestUser();
       String resourceType = context.getResourceType();
@@ -289,8 +247,8 @@ public class PolicyEngineImpl implements PolicyEngine {
       resourceName = PolicySpec.canonicalizeResourceName( resourceType, resourceName );
       String action = context.getAction().toLowerCase();
 
-      // System users are not restricted by quota limits.
-      if ( !evaluationContext.isSystemUser() ) {
+      // System admins are not restricted by quota limits.
+      if ( !evaluationContext.isSystemAdmin() ) {
         List<Authorization> quotas = lookupQuotas( resourceType, requestUser, evaluationContext.getRequestAccount(), requestUser.isAccountAdmin( ) );
         processQuotas( quotas, action, resourceType, resourceName, quantity );
       }
@@ -303,31 +261,28 @@ public class PolicyEngineImpl implements PolicyEngine {
   }
 
   @Override
-  public AuthEvaluationContext createEvaluationContext( final String resourceType,
+  public EvaluationContext createEvaluationContext( final String resourceType,
                                                     final String action,
-                                                    final User requestUser,
-                                                    final Map<String,String> evaluatedKeys ) {
-    return new AuthEvaluationContextImpl( resourceType, action, requestUser, evaluatedKeys );
+                                                    final User requestUser ) {
+    return new EvaluationContextImpl( resourceType, action, requestUser );
   }
 
   @Override
-  public AuthEvaluationContext createEvaluationContext( final String resourceType,
+  public EvaluationContext createEvaluationContext( final String resourceType,
                                                     final String action,
                                                     final User requestUser,
-                                                    final Map<String,String> evaluatedKeys,
                                                     final PrincipalType principalType,
                                                     final String principalName ) {
-    return new AuthEvaluationContextImpl( resourceType, action, requestUser, evaluatedKeys, principalType, principalName );
+    return new EvaluationContextImpl( resourceType, action, requestUser, principalType, principalName );
   }
 
-  private Decision evaluateResourceAuthorization( @Nonnull  final AuthEvaluationContext context,
-                                                  @Nonnull  final AuthorizationMatch authorizationMatch,
+  private Decision evaluateResourceAuthorization( @Nonnull  final EvaluationContext context,
                                                   @Nullable final String resourceAccountNumber,
                                                   @Nonnull  String resourceName,
                                                   @Nonnull  final Map<Contract.Type, Contract> contracts ) throws AuthException {
-    final AuthEvaluationContextImpl evaluationContext = (AuthEvaluationContextImpl)context;
+    final EvaluationContextImpl evaluationContext = (EvaluationContextImpl)context;
     final ContractKeyEvaluator contractEval = new ContractKeyEvaluator( contracts );
-    final CachedKeyEvaluator keyEval = new CachedKeyEvaluator( context.getEvaluatedKeys( ) );
+    final CachedKeyEvaluator keyEval = new CachedKeyEvaluator( );
     final String action = evaluationContext.getAction( );
     final User requestUser = evaluationContext.getRequestUser( );
     final String resourceType = evaluationContext.getResourceType( );
@@ -342,15 +297,15 @@ public class PolicyEngineImpl implements PolicyEngine {
     verifyUser( requestUser );
     final Account account = evaluationContext.getRequestAccount( );
 
-    // Check global (inter-account) authorizations first //TODO:STEVE: Should these apply for roles?
-    Decision decision = processAuthorizations( evaluationContext.lookupGlobalAuthorizations( ), authorizationMatch, action, resourceAccountNumber, resourceName, keyEval, contractEval );
+    // Check global (inter-account) authorizations first
+    Decision decision = processAuthorizations( evaluationContext.lookupGlobalAuthorizations( ), action, resourceName, keyEval, contractEval );
     if ( decision == Decision.DENY ) {
       LOG.debug( "Request is rejected by global authorization check, due to decision " + decision );
       return decision;
     }
 
-    if ( resourceAccountNumber != null && !resourceAccountNumber.equals( account.getAccountNumber( ) ) && !evaluationContext.isSystemUser() ) {
-      decision = processAuthorizations( evaluationContext.lookupLocalAuthorizations( ), authorizationMatch ,action, resourceAccountNumber ,resourceName, keyEval, contractEval );
+    if ( resourceAccountNumber != null && !resourceAccountNumber.equals( account.getAccountNumber( ) ) ) {
+      decision = processAuthorizations( evaluationContext.lookupLocalAuthorizations( ), action, resourceName, keyEval, contractEval );
       if ( decision == Decision.DENY ) {
         LOG.debug( "Request is rejected by local authorization check, due to decision " + decision );
       }
@@ -360,7 +315,7 @@ public class PolicyEngineImpl implements PolicyEngine {
       return Decision.ALLOW;
     } else {
       // If not denied by global authorizations, check local (intra-account) authorizations.
-      decision = processAuthorizations( evaluationContext.lookupLocalAuthorizations(), authorizationMatch, action, resourceAccountNumber, resourceName, keyEval, contractEval );
+      decision = processAuthorizations( evaluationContext.lookupLocalAuthorizations(), action, resourceName, keyEval, contractEval );
       // Denied by explicit or default deny
       if ( decision == Decision.DENY || decision == Decision.DEFAULT ) {
         LOG.debug( "Request is rejected by local authorization check, due to decision " + decision );
@@ -377,13 +332,11 @@ public class PolicyEngineImpl implements PolicyEngine {
   }
 
   private Decision processAuthorizations( List<Authorization> authorizations,
-                                          AuthorizationMatch authorizationMatch,
                                           String action,
-                                          String resourceAccountNumber,
                                           String resource,
                                           CachedKeyEvaluator keyEval,
                                           ContractKeyEvaluator contractEval ) throws AuthException {
-    return  processAuthorizations( authorizations, authorizationMatch ,action, resourceAccountNumber, resource, null, null, keyEval, contractEval );
+    return  processAuthorizations( authorizations, action, resource, null, null, keyEval, contractEval );
   }
 
     /**
@@ -398,9 +351,7 @@ public class PolicyEngineImpl implements PolicyEngine {
     * @throws AuthException
     */
   private Decision processAuthorizations( @Nonnull  final List<Authorization> authorizations,
-                                          @Nonnull  AuthorizationMatch authorizationMatch,
                                           @Nonnull  final String action,
-                                          @Nullable final String resourceAccountNumber,
                                           @Nullable final String resource,
                                           @Nullable final PrincipalType principalType,
                                           @Nullable final String principalName,
@@ -414,10 +365,7 @@ public class PolicyEngineImpl implements PolicyEngine {
       if ( !matchPrincipal( auth.getPrincipal(), principalType, principalName ) ) {
         continue;
       }
-      if ( authorizationMatch == AuthorizationMatch.Unconditional && auth.getEffect( ) == EffectType.Allow ) {
-        return Decision.ALLOW; // Cannot deny reliably with unconditional matching
-      }
-      if ( !matchResources( auth, resourceAccountNumber, resource ) ) {
+      if ( !matchResources( auth, resource ) ) {
         continue;
       }
       if ( !evaluateConditions( auth.getConditions( ), action, auth.getType( ), keyEval, contractEval ) ) {
@@ -445,22 +393,11 @@ public class PolicyEngineImpl implements PolicyEngine {
   }
 
   private boolean matchResources( Authorization auth, String resource ) throws AuthException {
-    return matchResources( auth, null, resource );
-  }
-
-  private boolean matchResources( @Nonnull  Authorization auth,
-                                  @Nullable String resourceAccountNumber,
-                                  @Nullable String resource ) throws AuthException {
-    
     if ( resource == null ) {
       return true;
-    } else if ( auth.getAccount() != null && resourceAccountNumber != null && !resolveAccount(auth.getAccount()).equals( resourceAccountNumber ) ) {
-      return auth.isNotResource( );
     } else  if ( PolicySpec.EC2_RESOURCE_ADDRESS.equals( auth.getType( ) ) ) {
       return evaluateElement( matchOne( auth.getResources( ), resource, ADDRESS_MATCHER ), auth.isNotResource( ) );
-    } else if ( String.format("%s:%s", PolicySpec.VENDOR_IAM, PolicySpec.IAM_RESOURCE_SERVER_CERTIFICATE).equals ( auth.getType( ))){
-      return evaluateElement( matchOne( auth.getResources( ), resource, SERVER_CERTIFICATE_MATCHER), auth.isNotResource() );
-    }else {
+    } else {
       return evaluateElement( matchOne( auth.getResources( ), resource, PATTERN_MATCHER ), auth.isNotResource( ) );
     }
   }
@@ -473,11 +410,7 @@ public class PolicyEngineImpl implements PolicyEngine {
     }
     return false;
   }
-
-  private String resolveAccount( final String accountNumberOrAlias ) {
-    return accountResolver.apply( accountNumberOrAlias );
-  }
-
+  
   private boolean evaluateElement( boolean patternMatched, boolean isNot ) {
     return ( ( patternMatched && !isNot ) || ( !patternMatched && isNot ) );
   }
@@ -536,10 +469,7 @@ public class PolicyEngineImpl implements PolicyEngine {
   private static List<Authorization> lookupLocalAuthorizations( String resourceType, User user ) throws AuthException {
     List<Authorization> results = Lists.newArrayList( );
     results.addAll( user.lookupAuthorizations( resourceType ) );
-    if ( resourceType != null && resourceType.contains( ":" ) && !resourceType.endsWith( ":*" ) ) {
-      results.addAll( user.lookupAuthorizations( resourceType.substring( 0, resourceType.indexOf( ':' ) ) + ":*" ) );
-    }
-    if ( resourceType != null && !PolicySpec.ALL_RESOURCE.equals( resourceType ) ) {
+    if ( !PolicySpec.ALL_RESOURCE.equals( resourceType ) ) {
       results.addAll( user.lookupAuthorizations( PolicySpec.ALL_RESOURCE ) );
     }
     return results;
@@ -661,8 +591,7 @@ public class PolicyEngineImpl implements PolicyEngine {
     return QuotaKey.Scope.USER;
   }
   
-  static class AuthEvaluationContextImpl implements AuthEvaluationContext {
-    @Nullable
+  private static class EvaluationContextImpl implements EvaluationContext {
     private final String resourceType;
     private final String action;
     private final User requestUser;
@@ -672,33 +601,27 @@ public class PolicyEngineImpl implements PolicyEngine {
     private final String principalName;
     private Account requestAccount;
     private Boolean systemAdmin;
-    private Boolean systemUser;
-    private Map<String,String> evaluatedKeys;
     private List<Authorization> globalAuthorizations;
     private List<Authorization> localAuthorizations;
 
-    AuthEvaluationContextImpl( @Nullable final String resourceType,
-                               final String action,
-                               final User requestUser,
-                               final Map<String, String> evaluatedKeys ) {
-      this( resourceType, action, requestUser, evaluatedKeys, null, null );
+    private EvaluationContextImpl( final String resourceType,
+                                   final String action,
+                                   final User requestUser ) {
+      this( resourceType, action, requestUser, null, null );
     }
 
-    AuthEvaluationContextImpl( @Nullable final String resourceType,
-                               final String action,
-                               final User requestUser,
-                               final Map<String, String> evaluatedKeys,
-                               @Nullable final PrincipalType principalType,
-                               @Nullable final String principalName ) {
+      private EvaluationContextImpl( final String resourceType,
+                                     final String action,
+                                     final User requestUser,
+                                     @Nullable final PrincipalType principalType,
+                                     @Nullable final String principalName ) {
       this.resourceType = resourceType;
       this.action = action.toLowerCase();
-      this.evaluatedKeys = ImmutableMap.copyOf( evaluatedKeys );
       this.requestUser = requestUser;
       this.principalType = principalType;
       this.principalName = principalName;
     }
 
-    @Nullable
     @Override
     public String getResourceType() {
       return resourceType;
@@ -712,10 +635,6 @@ public class PolicyEngineImpl implements PolicyEngine {
     @Override
     public User getRequestUser() {
       return requestUser;
-    }
-
-    public Map<String, String> getEvaluatedKeys( ) {
-      return evaluatedKeys;
     }
 
     @Override
@@ -732,12 +651,12 @@ public class PolicyEngineImpl implements PolicyEngine {
 
     @Override
     public String describe( String resourceAccountNumber, String resourceName ) {
-      return String.valueOf(resourceType) + ":" + resourceName + (resourceAccountNumber==null ? "" : " of " + resourceAccountNumber) + " for " + describePrincipal( );
+      return resourceType + ":" + resourceName + (resourceAccountNumber==null ? "" : " of " + resourceAccountNumber) + " for " + describePrincipal( );
     }
 
     @Override
     public String describe( final String resourceName, final Long quantity ) {
-      return String.valueOf(resourceType) + ":" + resourceName + " by " + quantity + " for " + describePrincipal( );
+      return resourceType + ":" + resourceName + " by " + quantity + " for " + describePrincipal( );
     }
 
     private String describePrincipal( ) {
@@ -760,20 +679,9 @@ public class PolicyEngineImpl implements PolicyEngine {
       return systemAdmin;
     }
 
-    boolean isSystemUser() {
-      if ( systemUser == null ) {
-        systemUser = requestUser.isSystemUser();
-      }
-      return systemUser;
-    }
-
     public List<Authorization> lookupGlobalAuthorizations( ) throws AuthException {
       if ( globalAuthorizations == null ) {
-        if ( resourceType != null ) {
-          globalAuthorizations = cached( PolicyEngineImpl.lookupGlobalAuthorizations( resourceType, getRequestAccount() ) );
-        } else {
-          globalAuthorizations = Collections.emptyList();
-        }
+        globalAuthorizations = cached( PolicyEngineImpl.lookupGlobalAuthorizations( resourceType, getRequestAccount() ) );
       }
       return globalAuthorizations;
     }
@@ -825,11 +733,6 @@ public class PolicyEngineImpl implements PolicyEngine {
         resource = ImmutableSet.copyOf( delegate.getResources() );
       }
       return resource;
-    }
-
-    @Override
-    public String getAccount() {
-      return delegate.getAccount( );
     }
 
     @Override
@@ -909,35 +812,6 @@ public class PolicyEngineImpl implements PolicyEngine {
     @Override
     public Condition apply( final Condition condition ) {
       return new CachedDelegatingCondition( condition );
-    }
-  }
-
-  private enum EucalyptusAccountNumberSupplier implements Supplier<String> {
-    INSTANCE;
-
-    @Override
-    public String get() {
-      try {
-        return Accounts.lookupAccountByName( Account.SYSTEM_ACCOUNT ).getAccountNumber( );
-      } catch ( AuthException e ) {
-        throw Exceptions.toUndeclared( e );
-      }
-    }
-  }
-
-  private enum DefaultAccountResolver implements Function<String,String> {
-    INSTANCE;
-
-    private static final Supplier<String> eucalyptusAccountNumberSupplier =
-        Suppliers.memoize( EucalyptusAccountNumberSupplier.INSTANCE );
-
-    @Override
-    public String apply( final String accountNumberOrAlias ) {
-      if ( Account.SYSTEM_ACCOUNT.equals( accountNumberOrAlias ) ) {
-        return eucalyptusAccountNumberSupplier.get( );
-      } else {
-        return accountNumberOrAlias;
-      }
     }
   }
 }

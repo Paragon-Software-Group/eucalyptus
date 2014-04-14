@@ -70,7 +70,6 @@ import java.util.MissingFormatArgumentException;
 import java.util.zip.DeflaterOutputStream;
 import java.util.zip.GZIPOutputStream;
 import javax.annotation.Nonnull;
-import javax.annotation.Nullable;
 import org.apache.log4j.Logger;
 import org.jboss.netty.buffer.ChannelBuffer;
 import org.jboss.netty.buffer.ChannelBuffers;
@@ -90,8 +89,6 @@ import com.eucalyptus.binding.Binding;
 import com.eucalyptus.binding.BindingException;
 import com.eucalyptus.binding.BindingManager;
 import com.eucalyptus.binding.HoldMe;
-import com.eucalyptus.component.ComponentId;
-import com.eucalyptus.component.annotation.ComponentPart;
 import com.eucalyptus.context.Context;
 import com.eucalyptus.context.Contexts;
 import com.eucalyptus.http.MappingHttpRequest;
@@ -112,24 +109,20 @@ public abstract class RestfulMarshallingHandler extends MessageStackHandler {
   private final String         namespacePattern;
   private Binding              defaultBinding          = BindingManager.getDefaultBinding( );
   private Binding              binding;
-  private final Class<? extends ComponentId> component;
   
   public RestfulMarshallingHandler( String namespacePattern ) {
     this.namespacePattern = namespacePattern;
-    this.component = getClass().getAnnotation( ComponentPart.class ) == null
-        ? null :
-        getClass().getAnnotation( ComponentPart.class ).value();
     try {
       this.setNamespace( String.format( namespacePattern ) );
     } catch ( MissingFormatArgumentException ex ) {}
   }
-
+  
   public RestfulMarshallingHandler( String namespacePattern, String defaultVersion ) {
     this( namespacePattern );
     final String defaultBindingNamespace = String.format( namespacePattern, defaultVersion );
-    this.defaultBinding = BindingManager.getBinding( BindingManager.sanitizeNamespace( defaultBindingNamespace ), component );
+    this.defaultBinding = BindingManager.getBinding( BindingManager.sanitizeNamespace( defaultBindingNamespace ) );
   }
-
+  
   @Override
   public void incomingMessage( MessageEvent event ) throws Exception {
     if ( event.getMessage( ) instanceof MappingHttpRequest ) {
@@ -154,7 +147,7 @@ public abstract class RestfulMarshallingHandler extends MessageStackHandler {
   
   protected void setNamespace( String namespace ) {
     this.namespace = namespace;
-    this.binding = BindingManager.getBinding( this.namespace, component );
+    this.binding = BindingManager.getBinding( this.namespace );
   }
 
   protected String getNamespaceForVersion( String bindingVersion ) {
@@ -177,7 +170,7 @@ public abstract class RestfulMarshallingHandler extends MessageStackHandler {
   public void outgoingMessage( ChannelHandlerContext ctx, MessageEvent event ) throws Exception {
     if ( event.getMessage( ) instanceof MappingHttpResponse ) {
       MappingHttpResponse httpResponse = ( MappingHttpResponse ) event.getMessage( );
-      ByteArrayOutputStream byteOut = new ByteArrayOutputStream( 8192 );
+      ByteArrayOutputStream byteOut = new ByteArrayOutputStream( );
       HoldMe.canHas.lock( );
       try {
         if ( httpResponse.getMessage( ) == null ) {
@@ -204,14 +197,12 @@ public abstract class RestfulMarshallingHandler extends MessageStackHandler {
         } else {//actually try to bind response
           final Object message = httpResponse.getMessage( );
           try {//use request binding
-            this.binding.toStream( byteOut, message, getNamespaceOverride( message, null ) );
+            this.binding.toStream( byteOut, message );
           } catch ( BindingException ex ) {
             Logs.extreme( ).error( ex, ex );
-            byteOut.reset();
             try {//use default binding with request namespace
-              getDefaultBinding( ).toStream( byteOut, message, getNamespaceOverride( message, this.namespace ) );
+              getDefaultBinding( ).toStream( byteOut, message, this.namespace );
             } catch ( BindingException ex1 ) {//use default binding
-              byteOut.reset();
               BindingManager.getDefaultBinding( ).toStream( byteOut, message );
             }
           } catch ( Exception e ) {
@@ -269,11 +260,6 @@ public abstract class RestfulMarshallingHandler extends MessageStackHandler {
     } catch ( final Exception e ) {
       LOG.error( "Error streaming response", e );
     }
-  }
-
-  protected String getNamespaceOverride( @Nonnull  final Object message,
-                                         @Nullable final String namespace ) {
-    return namespace;
   }
 
   /**

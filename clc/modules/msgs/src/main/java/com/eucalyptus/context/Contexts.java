@@ -1,5 +1,5 @@
 /*************************************************************************
- * Copyright 2009-2014 Eucalyptus Systems, Inc.
+ * Copyright 2009-2013 Eucalyptus Systems, Inc.
  *
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -64,20 +64,17 @@ package com.eucalyptus.context;
 
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
-
 import org.apache.log4j.Logger;
 import org.jboss.netty.channel.Channel;
 import org.jboss.netty.channel.Channels;
 import org.mule.RequestContext;
 import org.mule.api.MuleMessage;
-
 import com.eucalyptus.BaseException;
 import com.eucalyptus.http.MappingHttpRequest;
 import com.eucalyptus.records.EventRecord;
 import com.eucalyptus.records.EventType;
 import com.eucalyptus.records.Logs;
 import com.eucalyptus.ws.util.ReplyQueue;
-
 import edu.ucsb.eucalyptus.msgs.BaseMessage;
 import edu.ucsb.eucalyptus.msgs.BaseMessageSupplier;
 import edu.ucsb.eucalyptus.msgs.ExceptionResponseType;
@@ -251,7 +248,7 @@ public class Contexts {
       Channels.write( channel, message );
       clear( ctx );
     } catch ( NoSuchContextException e ) {
-      LOG.warn( "Received a reply for absent client:  No channel to write response message: " + e.getMessage( ) + " for " + responseMessage.getClass( ).getSimpleName( ) );
+      LOG.warn( "Received a reply for absent client:  No channel to write response message: " + e.getMessage( ) );
       Logs.extreme( ).debug( responseMessage, e );
     } catch ( Exception e ) {
       LOG.warn( "Error occurred while handling reply: " + responseMessage );
@@ -273,15 +270,12 @@ public class Contexts {
       Context ctx = lookup( corrId );
       EventRecord.here( ReplyQueue.class, EventType.MSG_REPLY, cause.getClass( ).getCanonicalName( ), cause.getMessage( ),
                         String.format( "%.3f ms", ( System.nanoTime( ) - ctx.getCreationTime( ) ) / 1000000.0 ) ).trace( );
-      if (cause.getCause() != null) {
-          Channel channel = ctx.getChannel( );
-          Channels.write( channel, new ExceptionResponseType( ctx.getRequest( ), cause.getCause( ).getMessage( ), cause.getCause( ) ) );
-      }
+      Channels.fireExceptionCaught( ctx.getChannel( ), cause );
       if ( !( cause instanceof BaseException ) ) {
         clear( ctx );
       }
     } catch ( Exception ex ) {
-      LOG.error( ex, ex );
+      LOG.error( ex );
       Logs.extreme( ).error( cause, cause );
     }
   }

@@ -64,7 +64,6 @@ package com.eucalyptus.blockstorage.entities;
 
 import java.util.Date;
 import java.util.List;
-import java.util.concurrent.TimeUnit;
 import javax.persistence.CascadeType;
 import javax.persistence.Column;
 import javax.persistence.Entity;
@@ -111,8 +110,6 @@ public class VolumeInfo extends AbstractPersistent {
 	private String zone;
 	@Column(name = "snapshot_id")
 	private String snapshotId;
-    @Column(name = "deletion_time")
-    private Date deletionTime;
 
 	@NotFound( action = NotFoundAction.IGNORE )
 	@OneToMany(fetch = FetchType.LAZY, mappedBy = "volume", orphanRemoval=true, cascade = CascadeType.ALL)
@@ -192,15 +189,7 @@ public class VolumeInfo extends AbstractPersistent {
 		this.snapshotId = snapshotId;
 	}
 
-    public Date getDeletionTime() {
-        return deletionTime;
-    }
-
-    public void setDeletionTime(Date deletionTime) {
-        this.deletionTime = deletionTime;
-    }
-
-    @Override
+	@Override
 	public boolean equals(Object obj) {
 		if (this == obj)
 			return true;
@@ -379,13 +368,4 @@ public class VolumeInfo extends AbstractPersistent {
 			throw new EucalyptusCloudException("Failed on invalidation of token");
 		}
 	}
-
-    public boolean cleanupOnDeletion() {
-        if (deletionTime != null) {
-            if (System.currentTimeMillis() > (deletionTime.getTime() + TimeUnit.MILLISECONDS.convert(StorageInfo.getStorageInfo().getDeletedVolExpiration(), TimeUnit.HOURS))) {
-                return true;
-            }
-        }
-        return false;
-    }
 }

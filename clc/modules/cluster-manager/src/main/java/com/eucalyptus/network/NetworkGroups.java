@@ -1,5 +1,5 @@
 /*************************************************************************
- * Copyright 2009-2014 Eucalyptus Systems, Inc.
+ * Copyright 2009-2013 Eucalyptus Systems, Inc.
  *
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -69,10 +69,8 @@ import java.util.Collection;
 import java.util.List;
 import java.util.NoSuchElementException;
 import java.util.Set;
-import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
-import javax.annotation.Nonnull;
 import javax.annotation.Nullable;
 import javax.persistence.EntityTransaction;
 import javax.persistence.PersistenceException;
@@ -83,8 +81,7 @@ import com.eucalyptus.auth.principal.Account;
 import com.eucalyptus.auth.principal.AccountFullName;
 import com.eucalyptus.auth.principal.User;
 import com.eucalyptus.auth.principal.UserFullName;
-import com.eucalyptus.compute.common.CloudMetadata;
-import com.eucalyptus.compute.common.CloudMetadatas;
+import com.eucalyptus.cloud.CloudMetadatas;
 import com.eucalyptus.cloud.util.DuplicateMetadataException;
 import com.eucalyptus.cloud.util.MetadataConstraintException;
 import com.eucalyptus.cloud.util.MetadataException;
@@ -94,22 +91,17 @@ import com.eucalyptus.cluster.ClusterConfiguration;
 import com.eucalyptus.component.ServiceConfiguration;
 import com.eucalyptus.component.ServiceConfigurations;
 import com.eucalyptus.component.id.ClusterController;
-import com.eucalyptus.compute.common.network.NetworkReportType;
 import com.eucalyptus.configurable.ConfigurableClass;
 import com.eucalyptus.configurable.ConfigurableField;
 import com.eucalyptus.entities.Entities;
 import com.eucalyptus.entities.PersistenceExceptions;
 import com.eucalyptus.entities.TransactionException;
-import com.eucalyptus.entities.TransactionResource;
 import com.eucalyptus.entities.Transactions;
-import com.eucalyptus.network.config.NetworkConfigurations;
 import com.eucalyptus.records.Logs;
 import com.eucalyptus.tags.FilterSupport;
 import com.eucalyptus.util.Callback;
-import com.eucalyptus.util.CollectionUtils;
 import com.eucalyptus.util.Exceptions;
 import com.eucalyptus.util.OwnerFullName;
-import com.eucalyptus.util.RestrictedTypes;
 import com.eucalyptus.util.TypeMapper;
 import com.eucalyptus.util.TypeMappers;
 import com.google.common.base.Enums;
@@ -148,14 +140,7 @@ public class NetworkGroups {
   public static Integer       NETWORK_TAG_PENDING_TIMEOUT   = 35;
   @ConfigurableField( description = "Minutes before a pending index allocation timesout and is released." )
   public static Integer       NETWORK_INDEX_PENDING_TIMEOUT = 35;
-  @ConfigurableField(
-      description = "Network configuration document.",
-      changeListener = NetworkConfigurations.NetworkConfigurationPropertyChangeListener.class )
-  public static String        NETWORK_CONFIGURATION = "";
-  @ConfigurableField( description = "Minimum interval between broadcasts of network information (seconds)." )
-  public static Integer       MIN_BROADCAST_INTERVAL = 5;
-
-
+  
   public static class NetworkRangeConfiguration {
     private Boolean useNetworkTags  = Boolean.TRUE;
     private Integer minNetworkTag   = GLOBAL_MIN_NETWORK_TAG;
@@ -163,15 +148,15 @@ public class NetworkGroups {
     private Long    minNetworkIndex = GLOBAL_MIN_NETWORK_INDEX;
     private Long    maxNetworkIndex = GLOBAL_MAX_NETWORK_INDEX;
     
-    Boolean hasNetworking( ) {
+    public Boolean hasNetworking( ) {
       return this.useNetworkTags;
     }
     
-    Boolean getUseNetworkTags( ) {
+    public Boolean getUseNetworkTags( ) {
       return this.useNetworkTags;
     }
     
-    void setUseNetworkTags( final Boolean useNetworkTags ) {
+    public void setUseNetworkTags( final Boolean useNetworkTags ) {
       this.useNetworkTags = useNetworkTags;
     }
     
@@ -221,12 +206,12 @@ public class NetworkGroups {
     }
     
   }  
-  private enum ActiveTags implements Function<NetworkReportType, Integer> {
+  private enum ActiveTags implements Function<NetworkInfoType, Integer> {
     INSTANCE;
     private final SetMultimap<String, Integer> backingMap            = HashMultimap.create( );
     private final SetMultimap<String, Integer> activeTagsByPartition = Multimaps.synchronizedSetMultimap( backingMap );
     
-    public Integer apply( final NetworkReportType input ) {
+    public Integer apply( final NetworkInfoType input ) {
       return input.getTag( );
     }
     
@@ -236,7 +221,7 @@ public class NetworkGroups {
      * @param cluster
      * @param activeNetworks
      */
-    private void update( ServiceConfiguration cluster, List<NetworkReportType> activeNetworks ) {
+    private void update( ServiceConfiguration cluster, List<NetworkInfoType> activeNetworks ) {
       removeStalePartitions( );
       Set<Integer> activeTags = Sets.newHashSet( Lists.transform( activeNetworks, ActiveTags.INSTANCE ) );
       this.activeTagsByPartition.replaceValues( cluster.getPartition( ), activeTags );
@@ -269,38 +254,23 @@ public class NetworkGroups {
       return this.activeTagsByPartition.containsValue( tag );
     }
   }
-
-  private enum NetworkIndexTransform implements Function<NetworkReportType, List<String>> {
-    INSTANCE;
-
-    @Override
-    public List<String> apply( @Nullable final NetworkReportType networkReportType ) {
-      final List<String> taggedIndices = Lists.newArrayList( );
-      if ( networkReportType != null && networkReportType.getAllocatedIndexes( ) != null ) {
-        for ( String index : networkReportType.getAllocatedIndexes( ) ) {
-          taggedIndices.add( networkReportType.getTag() + ":" + index );
-        }
-      }
-      return taggedIndices;
-    }
-  }
-
+  
   /**
    * Update network tag information by marking reported tags as being EXTANT and removing previously
    * EXTANT tags which are no longer reported
    * 
    * @param activeNetworks
    */
-  public static void updateExtantNetworks( ServiceConfiguration cluster, List<NetworkReportType> activeNetworks ) {
+  public static void updateExtantNetworks( ServiceConfiguration cluster, List<NetworkInfoType> activeNetworks ) {
     ActiveTags.INSTANCE.update( cluster, activeNetworks );
     /**
      * For each of the reported active network tags ensure that the locally stored extant network
      * state reflects that the network has now been EXTANT in the system (i.e. is no longer PENDING)
      */
-    for ( NetworkReportType activeNetReport : activeNetworks ) {
+    for ( NetworkInfoType activeNetInfo : activeNetworks ) {
       EntityTransaction tx = Entities.get( NetworkGroup.class );
       try {
-        NetworkGroup net = NetworkGroups.lookupByNaturalId( activeNetReport.getUuid() );
+        NetworkGroup net = NetworkGroups.lookupByNaturalId( activeNetInfo.getUuid( ) );
         if ( net.hasExtantNetwork( ) ) {
           ExtantNetwork exNet = net.extantNetwork( );
           if ( Reference.State.PENDING.equals( exNet.getState( ) ) ) {
@@ -348,7 +318,7 @@ public class NetworkGroups {
               if ( Reference.State.EXTANT.equals( exNet.getState( ) ) ) {
                 exNet.setState( Reference.State.RELEASING );
               } else if ( Reference.State.PENDING.equals( exNet.getState( ) )
-                              && isTimedOut( exNet.lastUpdateMillis( ), NetworkGroups.NETWORK_TAG_PENDING_TIMEOUT ) ) {
+                              && exNet.lastUpdateMillis( ) > 60L * 1000 * NetworkGroups.NETWORK_TAG_PENDING_TIMEOUT ) {
                 exNet.setState( Reference.State.RELEASING );
               } else if ( Reference.State.RELEASING.equals( exNet.getState( ) ) ) {
                 exNet.teardown( );
@@ -368,36 +338,6 @@ public class NetworkGroups {
     } catch ( MetadataException ex ) {
       LOG.error( ex );
     }
-
-    // Time out pending network indexes that are not reported
-    final Set<String> taggedNetworkIndicies = Sets.newHashSet( CollectionUtils.<String>listJoin()
-        .apply( Lists.transform( activeNetworks, NetworkIndexTransform.INSTANCE ) ) );
-    try ( final TransactionResource db = Entities.transactionFor( PrivateNetworkIndex.class  ) ) {
-      for ( final PrivateNetworkIndex index :
-          Entities.query( PrivateNetworkIndex.inState( Reference.State.PENDING ), Entities.queryOptions().build() ) ) {
-        if ( isTimedOut( index.lastUpdateMillis(), NetworkGroups.NETWORK_INDEX_PENDING_TIMEOUT ) ) {
-          if ( taggedNetworkIndicies.contains( index.getDisplayName( ) ) ) {
-            LOG.warn( String.format( "Pending network index (%s) timed out, setting state to EXTANT", index.getDisplayName( ) ) );
-            index.setState( Reference.State.EXTANT );
-          } else {
-            LOG.warn( String.format( "Pending network index (%s) timed out, tearing down", index.getDisplayName( ) ) );
-            index.release( );
-            index.teardown( );
-          }
-        }
-      }
-      db.commit();
-    } catch ( final Exception ex ) {
-      LOG.debug( ex );
-      Logs.extreme( ).error( ex, ex );
-    }
-  }
-
-  private static boolean isTimedOut( Long timeSinceUpdateMillis, Integer timeoutMinutes ) {
-    return
-        timeSinceUpdateMillis != null &&
-        timeoutMinutes != null &&
-        ( timeSinceUpdateMillis > TimeUnit.MINUTES.toMillis( timeoutMinutes )  );
   }
 
   static NetworkRangeConfiguration netConfig = new NetworkRangeConfiguration( );
@@ -504,20 +444,23 @@ public class NetworkGroups {
     return netConfig;
   }
   
-  public static NetworkGroup delete( final String groupId ) throws MetadataException {
+  public static NetworkGroup delete( final OwnerFullName ownerFullName, final String groupName ) throws MetadataException {
+    if ( defaultNetworkName( ).equals( groupName ) ) {
+      createDefault( ownerFullName );
+    }
     final EntityTransaction db = Entities.get( NetworkGroup.class );
     try {
-      final NetworkGroup ret = Entities.uniqueResult( NetworkGroup.withGroupId( null, groupId ) );
+      final NetworkGroup ret = Entities.uniqueResult( new NetworkGroup( ownerFullName, groupName ) );
       Entities.delete( ret );
       db.commit( );
       return ret;
     } catch ( final ConstraintViolationException ex ) {
       Logs.exhaust( ).error( ex, ex );
-      throw new MetadataConstraintException( "Failed to delete security group: " + groupId + " because of: "
+      throw new MetadataConstraintException( "Failed to delete security group: " + groupName + " for " + ownerFullName + " because of: "
                                                 + Exceptions.causeString( ex ), ex );
     } catch ( final Exception ex ) {
       Logs.exhaust( ).error( ex, ex );
-      throw new NoSuchMetadataException( "Failed to find security group: " + groupId, ex );
+      throw new NoSuchMetadataException( "Failed to find security group: " + groupName + " for " + ownerFullName, ex );
     } finally {
       if ( db.isActive( ) ) db.rollback( );
     }
@@ -698,12 +641,6 @@ public class NetworkGroups {
     }
   }
 
-  static void flushRules( ) {
-    if ( EdgeNetworking.isEnabled( ) ) {
-      NetworkInfoBroadcaster.requestNetworkInfoBroadcast( );
-    }
-  }
-
   @TypeMapper
   public enum NetworkPeerAsUserIdGroupPairType implements Function<NetworkPeer, UserIdGroupPairType> {
     INSTANCE;
@@ -723,7 +660,7 @@ public class NetworkGroups {
     
     @Override
     public IpPermissionType apply( final NetworkRule rule ) {
-      final IpPermissionType ipPerm = new IpPermissionType( rule.getProtocol( ).name( ), rule.getLowPort( ), rule.getHighPort( ) );
+      final IpPermissionType ipPerm = new IpPermissionType( rule.getProtocol( ), rule.getLowPort( ), rule.getHighPort( ) );
       final Iterable<UserIdGroupPairType> peers = Iterables.transform( rule.getNetworkPeers( ),
                                                                        TypeMappers.lookup( NetworkPeer.class, UserIdGroupPairType.class ) );
       Iterables.addAll( ipPerm.getGroups( ), peers );
@@ -774,7 +711,6 @@ public class NetworkGroups {
     /**
      * @see com.google.common.base.Function#apply(java.lang.Object)
      */
-    @Nonnull
     @Override
     public List<NetworkRule> apply( IpPermissionType ipPerm ) {
       List<NetworkRule> ruleList = new ArrayList<NetworkRule>( );
@@ -938,21 +874,6 @@ public class NetworkGroups {
           }
         }
         return result;
-      }
-    }
-  }
-
-  @RestrictedTypes.QuantityMetricFunction( CloudMetadata.NetworkGroupMetadata.class )
-  public enum CountNetworkGroups implements Function<OwnerFullName, Long> {
-    INSTANCE;
-
-    @Override
-    public Long apply( @Nullable final OwnerFullName input ) {
-      final EntityTransaction db = Entities.get( NetworkGroup.class );
-      try {
-        return Entities.count( NetworkGroup.withOwner( input ) );
-      } finally {
-        db.rollback( );
       }
     }
   }

@@ -64,11 +64,8 @@ package com.eucalyptus.vm;
 
 import java.util.Map;
 import java.util.NavigableSet;
-
 import javax.persistence.EntityTransaction;
-
 import org.apache.log4j.Logger;
-
 import com.eucalyptus.auth.Accounts;
 import com.eucalyptus.auth.AuthException;
 import com.eucalyptus.component.Component;
@@ -82,7 +79,7 @@ import com.eucalyptus.context.Contexts;
 import com.eucalyptus.context.IllegalContextAccessException;
 import com.eucalyptus.context.ServiceStateException;
 import com.eucalyptus.entities.Entities;
-import com.eucalyptus.objectstorage.ObjectStorage;
+import com.eucalyptus.objectstorage.Walrus;
 import com.eucalyptus.objectstorage.msgs.CreateBucketType;
 import com.eucalyptus.objectstorage.msgs.DeleteBucketType;
 import com.eucalyptus.records.EventRecord;
@@ -109,8 +106,8 @@ public class Bundles {
   private static Logger LOG = Logger.getLogger( Bundles.class );
   
   public static MessageCallback createCallback( BundleInstanceType request ) throws AuthException, IllegalContextAccessException, ServiceStateException {
-    final String objectStorageUrl = ServiceUris.remote( Topology.lookup( ObjectStorage.class ) ).toASCIIString( );
-    request.setUrl( objectStorageUrl );
+    final String walrusUrl = ServiceUris.remote( Topology.lookup( Walrus.class ) ).toASCIIString( );
+    request.setUrl( walrusUrl );
     request.setAwsAccessKeyId( Accounts.getFirstActiveAccessKeyId( Contexts.lookup( ).getUser( ) ) );
     return new BundleCallback( request );
   }
@@ -230,5 +227,44 @@ public class Bundles {
     if ( !bucketAndAcl.contains( "ec2-bundle-read" ) )
       throw new RuntimeException( "Custom policy is not acceptable for bundle instance" );
     
+  }
+  
+  private static void verifyPrefix( String prefix ) {
+    // check if the prefix name starts with "windows"
+    if ( !prefix.startsWith( "windows" ) )
+      /**
+       * GRZE:NOTE: bundling is /not/ restricted to windows
+       * only in general.
+       * what is it doing here? should be set in the manifest by the NC.
+       **/
+      throw new RuntimeException( "Prefix name should start with 'windows'" );
+  }
+  
+  /**
+   * @param bucket
+   * @throws AuthException 
+   */
+  private static void verifyBucket( final String bucketName ) throws AuthException {
+    final Context ctx = Contexts.lookup( );
+    final String accessKey = Accounts.getFirstActiveAccessKeyId( ctx.getUser( ) );
+    CreateBucketType createBucket = new CreateBucketType( ) {
+      {
+        setAccessKeyID( accessKey );
+        setBucket( bucketName );
+      }
+    }.regardingUserRequest( ctx.getRequest( ) );
+    DeleteBucketType deleteBucket = new DeleteBucketType( ) {
+      {
+        setAccessKeyID( accessKey );
+        setBucket( bucketName );
+      }
+    }.regardingUserRequest( ctx.getRequest( ) );
+    ServiceConfiguration walrusConfig = Topology.lookup( Walrus.class );
+    try {
+      AsyncRequests.sendSync( walrusConfig, createBucket );
+      AsyncRequests.sendSync( walrusConfig, deleteBucket );
+    } catch ( Exception ex ) {
+      throw new RuntimeException("Can't create the requested bucket", ex);
+    }    
   }
 }

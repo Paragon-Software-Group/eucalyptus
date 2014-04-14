@@ -1,5 +1,5 @@
 /*************************************************************************
- * Copyright 2009-2014 Eucalyptus Systems, Inc.
+ * Copyright 2009-2012 Eucalyptus Systems, Inc.
  *
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -62,29 +62,20 @@
 
 package edu.ucsb.eucalyptus.cloud.entities;
 
-import java.util.NoSuchElementException;
 import java.util.UUID;
-import java.util.concurrent.TimeUnit;
 import javax.persistence.Column;
 import javax.persistence.Entity;
 import javax.persistence.PersistenceContext;
 import javax.persistence.Table;
-
-import org.apache.http.conn.util.InetAddressUtils;
 import org.apache.log4j.Logger;
 import org.hibernate.annotations.Cache;
 import org.hibernate.annotations.CacheConcurrencyStrategy;
 import com.eucalyptus.configurable.ConfigurableClass;
 import com.eucalyptus.configurable.ConfigurableField;
-import com.eucalyptus.configurable.ConfigurableProperty;
-import com.eucalyptus.configurable.ConfigurablePropertyException;
-import com.eucalyptus.configurable.PropertyChangeListener;
 import com.eucalyptus.entities.AbstractPersistent;
-import com.eucalyptus.entities.Entities;
-import com.eucalyptus.entities.TransactionResource;
+import com.eucalyptus.entities.EntityWrapper;
 import com.eucalyptus.util.DNSProperties;
-import com.google.common.base.Supplier;
-import com.google.common.base.Suppliers;
+import com.eucalyptus.util.EucalyptusCloudException;
 
 @Entity
 @PersistenceContext( name = "eucalyptus_general" )
@@ -93,43 +84,7 @@ import com.google.common.base.Suppliers;
 @ConfigurableClass( root = "system.dns", description = "Basic system configuration." )
 @Deprecated  //GRZE: this class will FINALLY be superceded by new DNS support in 3.4: DO NOT USE IT!
 public class SystemConfiguration extends AbstractPersistent {
-    private static Logger LOG = Logger.getLogger( SystemConfiguration.class );
-
-    public static class SystemConfigurationNameServerChangeListener implements PropertyChangeListener {
-        @Override
-        public void fireChange( ConfigurableProperty t, Object newValue ) throws ConfigurablePropertyException {
-            try {
-                if ( newValue instanceof String ) {
-                    String value = ((String) newValue);
-                    // Only validate if not empty.. Empty is also valid
-                    if ( !value.equals("") ) {
-                        // Were we provided a coma-delimited list or a single entry
-                        if ( value.contains(",") ) {
-                            // Validate every hosts.
-                            for ( final String entry : value.split(",") ) {
-                                if ( !InetAddressUtils.isIPv4Address( entry ) ) {
-                                    throw new ConfigurablePropertyException("Malformed domain name server list");
-                                }
-                            }
-                        } else {
-                            if ( !InetAddressUtils.isIPv4Address( value ) ) {
-                                throw new ConfigurablePropertyException("Malformed domain name server list");
-                            }
-                        }
-                    }
-                }
-            } catch ( final Exception e ) {
-                throw new ConfigurablePropertyException("Malformed domain name server list");
-            }
-        }
-    }
-
-  private static final Supplier<SystemConfiguration> systemConfigurationSupplier = Suppliers.memoizeWithExpiration(
-      SystemConfigurationSupplier.INSTANCE,
-      5,
-      TimeUnit.SECONDS
-  );
-
+  private static Logger LOG = Logger.getLogger( SystemConfiguration.class );
   @ConfigurableField( description = "Unique ID of this cloud installation.", readonly = false )
   @Column( name = "system_registration_id" )
   private String  registrationId;
@@ -142,7 +97,7 @@ public class SystemConfiguration extends AbstractPersistent {
   @Column( name = "nameserver" )
   private String  nameserver;
   @Deprecated  //GRZE: this class will FINALLY be superceded by new DNS support in 3.4: DO NOT USE IT!
-  @ConfigurableField( description = "Nameserver ip address.", changeListener = SystemConfigurationNameServerChangeListener.class )
+  @ConfigurableField( description = "Nameserver ip address." )
   @Column( name = "ns_address" )
   private String  nameserverAddress;
 
@@ -214,35 +169,37 @@ public class SystemConfiguration extends AbstractPersistent {
   }
 
   public static SystemConfiguration getSystemConfiguration() {
-    return systemConfigurationSupplier.get( );
+  	EntityWrapper<SystemConfiguration> confDb = EntityWrapper.get( SystemConfiguration.class );
+  	SystemConfiguration conf = null;
+  	try {
+  		conf = confDb.getUnique( new SystemConfiguration());
+  		SystemConfiguration.validateSystemConfiguration(conf);
+  		confDb.commit();
+  	}
+  	catch ( EucalyptusCloudException e ) {
+  	  LOG.warn("Failed to get system configuration. Loading defaults.");
+  		conf = SystemConfiguration.validateSystemConfiguration(null);
+  		confDb.add(conf);
+  		confDb.commit();
+  	}
+  	catch (Exception t) {
+  		LOG.error("Unable to get system configuration.");
+  		confDb.rollback();
+  		return validateSystemConfiguration(null);
+  	}
+  	return conf;
   }
 
-  private enum SystemConfigurationSupplier implements Supplier<SystemConfiguration> {
-    INSTANCE;
-
-    @Override
-    public SystemConfiguration get() {
-      try {
-        try ( final TransactionResource db = Entities.transactionFor( SystemConfiguration.class ) ) {
-          SystemConfiguration conf = Entities.uniqueResult( new SystemConfiguration());
-          SystemConfiguration.validateSystemConfiguration( conf );
-          db.commit( );
-          return conf;
-        } catch ( NoSuchElementException e ) {
-          try ( final TransactionResource db = Entities.transactionFor( SystemConfiguration.class ) ) {
-            LOG.warn("Failed to get system configuration. Loading defaults.");
-            SystemConfiguration conf = SystemConfiguration.validateSystemConfiguration(null);
-            Entities.persist( conf );
-            db.commit( );
-            return conf;
-          }
-        }
-      } catch (Exception t) {
-        LOG.error("Unable to get system configuration.", t);
-        return validateSystemConfiguration(null);
-      }
+  /*public static String getWalrusUrl() throws EucalyptusCloudException {
+    Component walrus = Components.lookup( Walrus.class );
+    if( Topology.isEnabled( Walrus.class ) ) {
+      ServiceConfiguration walrusConfig = Topology.lookup( Walrus.class );
+      return walrusConfig.getUri( ).toASCIIString( );
+    } else {
+      LOG.error( "BUG BUG: Deprecated method called. No walrus service is registered.  Using local address for walrus URL." );
+      return ServiceUris.remote( walrus ).toASCIIString( );
     }
-  }
+  }*/
 
   private static SystemConfiguration validateSystemConfiguration(SystemConfiguration s) {
     SystemConfiguration sysConf = s != null ? s : new SystemConfiguration(); 

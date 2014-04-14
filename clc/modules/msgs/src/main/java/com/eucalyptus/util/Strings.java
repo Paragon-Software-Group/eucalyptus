@@ -19,8 +19,6 @@
  ************************************************************************/
 package com.eucalyptus.util;
 
-import java.util.Objects;
-import javax.annotation.Nonnull;
 import javax.annotation.Nullable;
 import com.google.common.base.Function;
 import com.google.common.base.Predicate;
@@ -35,28 +33,24 @@ public class Strings {
    * Null safe string conversion
    *
    * @param object The object to convert to a String
-   * @return The object as a String or null if null
+   * @return The object as a String or null if null                    
    */
   public static String toString( @Nullable final Object object ) {
-    return Objects.toString( object, null );
+    return toString( object, null );
   }
 
   /**
-   * Remove optional prefix from the given text.
-   *
-   * @param text The text to trim
-   * @return The trimmed text or null if text was null
+   * Null safe string conversion
+   * 
+   * @param object The object to convert to a String
+   * @param defaultValue The default value to use
+   * @return The object as a String or the default value if null                    
    */
-  public static String trimPrefix( @Nonnull  final String prefix,
-                                   @Nullable final String text ) {
-    if ( text != null && text.startsWith( prefix ) ) {
-      return text.substring( prefix.length( ) );
-    } else {
-      return text;
-    }
+  public static String toString( @Nullable final Object object,
+                                 @Nullable final String defaultValue ) {
+    return object == null ? defaultValue : object.toString();     
   }
-
-
+  
   /**
    * Get a Function for trimming a String.
    *
@@ -128,40 +122,6 @@ public class Strings {
   }
 
   /**
-   * Get a Predicate for matching the end of a String.
-   *
-   * @param suffix The suffix to match
-   * @return The predicate
-   * @see String#endsWith(String)
-   */
-  public static Predicate<String> endsWith( final String suffix ) {
-    return new Predicate<String>() {
-      @Override
-      public boolean apply( @Nullable final String text ) {
-        return text != null && text.endsWith( suffix );
-      }
-    };
-  }
-
-  /**
-   * Get a Predicate for matching the end of a String.
-   *
-   * @param text The text to perform a suffix match against
-   * @return The predicate
-   * @see String#endsWith(String)
-   */
-  public static Predicate<String> isSuffixOf( final String text ) {
-    return text == null ?
-        Predicates.<String>alwaysFalse() :
-        new Predicate<String>() {
-          @Override
-          public boolean apply( @Nullable final String prefix ) {
-            return prefix != null && text.endsWith( prefix );
-          }
-        };
-  }
-
-  /**
    * Convert an object to a string.
    *
    * <P>The returned function will pass through null values.</P>
@@ -189,9 +149,9 @@ public class Strings {
     TRIM {
       @Override
       public String apply( final String text ) {
-        return text == null ? null : text.trim();
+        return text == null ? null : text.toUpperCase();
       }
-    }
+    }    
   }
   
   private enum StringerFunctions implements Function<Object,String> {

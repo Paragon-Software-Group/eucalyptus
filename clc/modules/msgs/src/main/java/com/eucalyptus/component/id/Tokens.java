@@ -1,5 +1,5 @@
 /*************************************************************************
- * Copyright 2009-2014 Eucalyptus Systems, Inc.
+ * Copyright 2009-2012 Eucalyptus Systems, Inc.
  *
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -27,11 +27,17 @@ import com.eucalyptus.component.annotation.Partition;
 import com.eucalyptus.component.annotation.PolicyVendor;
 import com.eucalyptus.component.annotation.PublicService;
 
+@Partition( Eucalyptus.class )
 @PublicService
-@AwsServiceName( "sts" )
 @PolicyVendor( PolicySpec.VENDOR_STS )
-@Partition( value = Tokens.class, manyToOne=true )
-@FaultLogPrefix( "services" )
+@FaultLogPrefix( "cloud" )
+@AwsServiceName( "sts" )
 public class Tokens extends ComponentId {
-  private static final long serialVersionUID = 1L;
+  public static Tokens INSTANCE = new Tokens( );
+
+  @Override
+  public boolean isPublicService( ) {
+    return true;
+  }
+
 }

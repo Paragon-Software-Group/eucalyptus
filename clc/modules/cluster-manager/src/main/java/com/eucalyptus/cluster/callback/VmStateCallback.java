@@ -1,5 +1,5 @@
 /*************************************************************************
- * Copyright 2009-2014 Eucalyptus Systems, Inc.
+ * Copyright 2009-2012 Eucalyptus Systems, Inc.
  *
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -63,25 +63,17 @@
 package com.eucalyptus.cluster.callback;
 
 import java.util.Collection;
-import java.util.Collections;
 import java.util.NoSuchElementException;
 import java.util.Set;
 import java.util.concurrent.CancellationException;
-import javax.annotation.Nullable;
 import javax.persistence.EntityTransaction;
 import org.apache.log4j.Logger;
-import org.hibernate.criterion.Restrictions;
 import com.eucalyptus.bootstrap.Databases;
-import com.eucalyptus.compute.common.CloudMetadatas;
+import com.eucalyptus.cloud.CloudMetadatas;
 import com.eucalyptus.cluster.Cluster;
-import com.eucalyptus.compute.common.network.InstanceResourceReportType;
-import com.eucalyptus.compute.common.network.Networking;
-import com.eucalyptus.compute.common.network.UpdateInstanceResourcesType;
 import com.eucalyptus.entities.Entities;
 import com.eucalyptus.entities.TransactionException;
 import com.eucalyptus.records.Logs;
-import com.eucalyptus.util.TypeMapper;
-import com.eucalyptus.util.TypeMappers;
 import com.eucalyptus.util.async.FailedRequestException;
 import com.eucalyptus.util.async.SubjectMessageCallback;
 import com.eucalyptus.vm.VmBundleTask.BundleState;
@@ -92,7 +84,6 @@ import com.eucalyptus.vm.VmInstances;
 import com.eucalyptus.vm.VmInstances.TerminatedInstanceException;
 import com.eucalyptus.vmtypes.VmType;
 import com.eucalyptus.vmtypes.VmTypes;
-import com.google.common.base.Function;
 import com.google.common.base.Predicate;
 import com.google.common.base.Predicates;
 import com.google.common.base.Supplier;
@@ -124,7 +115,7 @@ public class VmStateCallback extends StateUpdateMessageCallback<Cluster, VmDescr
       public Set<String> get( ) {
         final EntityTransaction db = Entities.get( VmInstance.class );
         try {
-          Collection<VmInstance> clusterInstances =  VmInstances.list( null, Restrictions.conjunction( ), Collections.<String,String>emptyMap( ), filter );
+          Collection<VmInstance> clusterInstances =  Collections2.filter( VmInstances.list( ), filter );
           Collection<String> instanceNames = Collections2.transform( clusterInstances, CloudMetadatas.toDisplayName( ) );
           return Sets.newHashSet( instanceNames );
         } catch ( Exception ex ) {
@@ -148,11 +139,6 @@ public class VmStateCallback extends StateUpdateMessageCallback<Cluster, VmDescr
   
   @Override
   public void fire( VmDescribeResponseType reply ) {
-    UpdateInstanceResourcesType update = new UpdateInstanceResourcesType( );
-    update.setPartition( this.getSubject().getPartition() );
-    update.setResources( TypeMappers.transform( reply, InstanceResourceReportType.class ) );
-    Networking.getInstance( ).update( update );
-
     if ( Databases.isVolatile( ) ) {
       return;
     } else {
@@ -193,8 +179,9 @@ public class VmStateCallback extends StateUpdateMessageCallback<Cluster, VmDescr
   }
   
   private static void handleUnreported( final String vmId ) {
+    final EntityTransaction db1 = Entities.get( VmInstance.class );
     try {
-      VmInstance vm = VmInstances.lookupAny( vmId );
+      VmInstance vm = VmInstances.cachedLookup( vmId );
       if ( VmState.PENDING.apply( vm ) && vm.lastUpdateMillis( ) < ( VmInstances.VM_INITIAL_REPORT_TIMEOUT * 1000 ) ) {
         //do nothing during first VM_INITIAL_REPORT_TIMEOUT millis of instance life
         return;
@@ -205,8 +192,6 @@ public class VmStateCallback extends StateUpdateMessageCallback<Cluster, VmDescr
       } else if ( VmState.SHUTTING_DOWN.apply( vm ) ) {
         VmInstances.terminated( vm );
       } else if ( VmInstances.Timeout.TERMINATED.apply( vm ) ) {
-        VmInstances.buried( vm );
-      } else if ( VmInstances.Timeout.BURIED.apply( vm ) ) {
         VmInstances.delete( vm );
       } else if ( VmInstances.Timeout.SHUTTING_DOWN.apply( vm ) ) {
         VmInstances.terminated( vm );
@@ -217,9 +202,11 @@ public class VmStateCallback extends StateUpdateMessageCallback<Cluster, VmDescr
       } else {
         return;
       }
+      Entities.commit( db1 );
     } catch ( final Exception ex ) {
-      LOG.error( ex );
       Logs.extreme( ).error( ex, ex );
+    } finally {
+      if ( db1.isActive() ) db1.rollback();
     }
   }
   
@@ -228,11 +215,13 @@ public class VmStateCallback extends StateUpdateMessageCallback<Cluster, VmDescr
     try {
       final EntityTransaction db = Entities.get( VmInstance.class );
       try {
-        VmInstance vm = VmInstances.lookupAny( runVm.getInstanceId() );
-        if ( VmStateSet.DONE.apply( vm ) ) {
+        VmInstance vm = VmInstances.cachedLookup( runVm.getInstanceId() );
+        if ( VmState.TERMINATED.apply( vm ) ) {
           db.rollback( );
           if ( VmInstance.Reason.EXPIRED.apply( vm ) ) {
-            VmStateCallback.handleRestore( runVm );
+            if ( VmStateCallback.handleRestore( runVm ) ) {
+              VmInstances.restored( runVm.getInstanceId() );
+            }
           } else {
             LOG.trace( "Ignore state update to terminated instance: " + runVm.getInstanceId( ) );
           }
@@ -279,14 +268,11 @@ public class VmStateCallback extends StateUpdateMessageCallback<Cluster, VmDescr
     final VmState runVmState = VmState.Mapper.get( runVm.getStateName( ) );
     if ( VmStateSet.RUN.contains( runVmState ) ) {
       try {
-        final VmInstance vm = VmInstances.lookupAny( runVm.getInstanceId() );
+        final VmInstance vm = VmInstances.cachedLookup( runVm.getInstanceId( ) );
         if ( vm != null &&
-            !( VmStateSet.DONE.apply( vm ) && VmInstance.Reason.EXPIRED.apply( vm ) ) ) {
+            !( VmState.TERMINATED.apply( vm ) && VmInstance.Reason.EXPIRED.apply( vm ) ) ) {
           return false;
         }
-      } catch ( NoSuchElementException ex ) {
-        LOG.debug( "Instance record not found for restore: " + runVm.getInstanceId( ) );
-        Logs.extreme( ).error( ex, ex );
       } catch ( Exception ex ) {
         LOG.error( ex );
         Logs.extreme( ).error( ex, ex );
@@ -389,25 +375,5 @@ public class VmStateCallback extends StateUpdateMessageCallback<Cluster, VmDescr
   public void setSubject( Cluster subject ) {
     super.setSubject( subject );
     this.initialInstances.get( );
-  }
-
-  @TypeMapper
-  public enum VmDescribeResponseTypeToInstanceResourceReport implements Function<VmDescribeResponseType,InstanceResourceReportType> {
-    INSTANCE;
-
-    @Nullable
-    @Override
-    public InstanceResourceReportType apply( final VmDescribeResponseType response ) {
-      final InstanceResourceReportType report = new InstanceResourceReportType( );
-      for ( final VmInfo vmInfo : response.getVms( ) ) {
-        if ( !"Teardown".equals( vmInfo.getStateName() ) && vmInfo.getNetParams() != null ) {
-          report.getPublicIps( ).add( vmInfo.getNetParams( ).getIgnoredPublicIp( ) );
-          report.getPrivateIps().add( vmInfo.getNetParams( ).getIpAddress() );
-          report.getMacs().add( vmInfo.getNetParams( ).getMacAddress() );
-        }
-      }
-
-      return report;
-    }
   }
 }

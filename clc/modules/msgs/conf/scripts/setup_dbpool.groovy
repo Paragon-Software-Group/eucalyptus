@@ -61,7 +61,6 @@
  ************************************************************************/
 
 import groovy.xml.MarkupBuilder
-import net.sf.hajdbc.xml.SchemaGenerator
 import org.apache.log4j.Logger
 import org.logicalcobwebs.proxool.ProxoolFacade
 import com.eucalyptus.bootstrap.Databases
@@ -108,8 +107,7 @@ def setupDbPool = { String ctx_simplename ->
   LOG.info( "${ctx_simplename} Preparing jdbc cluster:        ${ha_jdbc_config_file_name}" )
   new File( ha_jdbc_config_file_name ).withWriter{ writer ->
     def xml = new MarkupBuilder(writer);
-    xml.'ha-jdbc'(xmlns: SchemaGenerator.NAMESPACE) {
-      sync(id:'dump-restore')
+    xml.'ha-jdbc'(xmlns: 'urn:ha-jdbc:cluster:2.1') {
       sync(id:'full') {
         'property'(name:'fetchSize', '1000')
         'property'(name:'maxBatchSize', '1000')

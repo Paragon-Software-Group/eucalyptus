@@ -64,8 +64,7 @@
 package edu.ucsb.eucalyptus.msgs;
 
 import com.eucalyptus.binding.HttpParameterMapping;
-import com.eucalyptus.binding.HttpEmbedded
-import com.google.common.collect.Lists;
+import com.eucalyptus.binding.HttpEmbedded;
 
 public class VmImageMessage extends EucalyptusMessage {
   
@@ -92,30 +91,34 @@ public class DeregisterImageType extends VmImageMessage {
 /** *******************************************************************************/
 public class DescribeImageAttributeResponseType extends VmImageMessage {
   String imageId
-  ArrayList<LaunchPermissionItemType> launchPermission = Lists.newArrayList( )
-  ArrayList<String> productCodes = Lists.newArrayList( )
-  ArrayList<String> kernel = Lists.newArrayList( )
-  ArrayList<String> ramdisk = Lists.newArrayList( )
-  ArrayList<BlockDeviceMappingItemType> blockDeviceMapping = Lists.newArrayList( )
-  ArrayList<String> description = Lists.newArrayList( )
-
-  boolean hasLaunchPermissions() {
-    this.launchPermission
+  ArrayList<LaunchPermissionItemType> launchPermission = []
+  ArrayList<String> productCodes = []
+  ArrayList<String> kernel = []
+  ArrayList<String> ramdisk = []
+  ArrayList<BlockDeviceMappingItemType> blockDeviceMapping = []
+  ArrayList<String> description = []
+  protected ArrayList realResponse
+  
+  public void setRealResponse( ArrayList r ) {
+    this.realResponse = r;
   }
-  boolean hasBlockDeviceMapping() {
-    this.blockDeviceMapping
+  public boolean hasLaunchPermissions() {
+    return this.realResponse.is(this.launchPermission);
   }
-  boolean hasProductCodes() {
-    this.productCodes
+  public boolean hasBlockDeviceMapping() {
+    return this.realResponse.is(this.blockDeviceMapping);
   }
-  boolean hasKernel() {
-    this.kernel
+  public boolean hasProductCodes() {
+    return this.realResponse.is(this.productCodes);
   }
-  boolean hasRamdisk() {
-    this.ramdisk
+  public boolean hasKernel() {
+    return this.realResponse.is(this.kernel);
   }
-  boolean hasDescription() {
-    this.description
+  public boolean hasRamdisk() {
+    return this.realResponse.is(this.ramdisk);
+  }
+  public boolean hasDescription() {
+    return this.realResponse.is(this.description);
   }
 }
 
@@ -167,7 +170,7 @@ public class ModifyImageAttributeType extends VmImageMessage {
 
   String imageId;
   @HttpParameterMapping (parameter = "ProductCode")
-  ArrayList<String> productCodes = Lists.newArrayList()
+  ArrayList<String> productCodes = []
 
   // Post 2010-06-15
   @HttpEmbedded
@@ -177,13 +180,13 @@ public class ModifyImageAttributeType extends VmImageMessage {
 
   // Up to 2010-06-15
   @HttpParameterMapping( parameter = "UserId")
-  ArrayList<String> queryUserId = Lists.newArrayList()
+  ArrayList<String> queryUserId = []
   @HttpParameterMapping (parameter = ["Group","UserGroup"])
-  ArrayList<String> queryUserGroup = Lists.newArrayList()
+  ArrayList<String> queryUserGroup = []
   String attribute;
   String operationType;
 
-  ImageAttribute imageAttribute( ) {
+  ImageAttribute getImageAttribute( ) {
     if ( attribute ) {
       'launchPermission'.equals( attribute ) ?
         ImageAttribute.LaunchPermission :
@@ -197,37 +200,37 @@ public class ModifyImageAttributeType extends VmImageMessage {
     }
   }
 
-  boolean add() {
-    !asAddLaunchPermissionsItemTypes().isEmpty()
+  boolean isAdd() {
+    !getAdd().isEmpty()
   }
 
-  List<String> userIds() {
-    add() ?
-      asAddLaunchPermissionsItemTypes().collect{ LaunchPermissionItemType add -> add.userId }.findAll{ String id -> id } as List<String> :
-      asRemoveLaunchPermissionsItemTypes().collect{ LaunchPermissionItemType remove -> remove.userId }.findAll{ String id -> id } as List<String>
+  List<String> getUserIds() {
+    isAdd() ?
+      getAdd().collect{ it.userId }.findAll{ it } :
+      getRemove().collect{ it.userId }.findAll{ it }
   }
 
-  boolean groupAll() {
-    ( asAddLaunchPermissionsItemTypes().find{ LaunchPermissionItemType add -> 'all'.equals( add.getGroup() ) } ||
-      asRemoveLaunchPermissionsItemTypes().find{ LaunchPermissionItemType remove -> 'all'.equals( remove.getGroup() ) } )
+  boolean isGroupAll() {
+    ( getAdd().find{ 'all'.equals( it.getGroup() ) } ||
+      getRemove().find{ 'all'.equals( it.getGroup() ) } )
   }
 
-  List<LaunchPermissionItemType> asAddLaunchPermissionsItemTypes() {
+  List<LaunchPermissionItemType> getAdd() {
     attribute ?
-      'add'.equals( operationType ) ? asLaunchPermissionItemTypes() : Lists.newArrayList() :
+      'add'.equals( operationType ) ? asLaunchPermissionItemTypes() : [] :
       launchPermission.getAdd()
   }
 
-  List<LaunchPermissionItemType> asRemoveLaunchPermissionsItemTypes() {
+  List<LaunchPermissionItemType> getRemove() {
     attribute ?
-      'add'.equals( operationType ) ? Lists.newArrayList() : asLaunchPermissionItemTypes() :
+      'add'.equals( operationType ) ? [] : asLaunchPermissionItemTypes() :
       launchPermission.getRemove()
   }
 
   private List<LaunchPermissionItemType> asLaunchPermissionItemTypes() {
     queryUserId.isEmpty() ?
-      queryUserGroup.collect{ String group -> new LaunchPermissionItemType( group: group ) } :
-      queryUserId.collect{ String userId -> new LaunchPermissionItemType( userId: userId ) }
+      queryUserGroup.collect{ new LaunchPermissionItemType( group: it ) } :
+      queryUserId.collect{ new LaunchPermissionItemType( userId: it ) }
   }
 
 }
@@ -297,9 +300,9 @@ public class ImageDetails extends EucalyptusData {
 
 public class LaunchPermissionOperationType extends EucalyptusData {
   @HttpEmbedded( multiple = true )
-  ArrayList<LaunchPermissionItemType> add = Lists.newArrayList()
+  ArrayList<LaunchPermissionItemType> add = []
   @HttpEmbedded( multiple = true )
-  ArrayList<LaunchPermissionItemType> remove = Lists.newArrayList()
+  ArrayList<LaunchPermissionItemType> remove = []
 
   def LaunchPermissionOperationType() {
   }
@@ -326,11 +329,11 @@ public class LaunchPermissionItemType extends EucalyptusData {
     return new LaunchPermissionItemType(null, "all" );
   }
   
-  public boolean user() {
+  public boolean isUser() {
     return this.userId != null
   }
   
-  public boolean group() {
+  public boolean isGroup() {
     return this.group != null
   }
 

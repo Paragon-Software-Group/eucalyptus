@@ -70,7 +70,7 @@ import javax.annotation.Nullable;
 import org.apache.log4j.Logger;
 import com.eucalyptus.bootstrap.Bootstrap;
 import com.eucalyptus.bootstrap.Hosts;
-import com.eucalyptus.compute.common.CloudMetadata.AddressMetadata;
+import com.eucalyptus.cloud.CloudMetadata.AddressMetadata;
 import com.eucalyptus.cloud.util.NotEnoughResourcesException;
 import com.eucalyptus.cluster.Cluster;
 import com.eucalyptus.cluster.Clusters;
@@ -249,7 +249,7 @@ public class Addresses extends AbstractNamedRegistry<Address> implements EventLi
           final VmInstance vm = VmInstances.lookup( instanceId );
           final String vmIp = Objects.firstNonNull( vm.getPublicAddress( ), UNASSIGNED_INSTANCEADDR );
           if ( VmStateSet.RUN.apply( vm ) ) {
-            AddressingDispatcher.dispatch(
+            AsyncRequests.dispatchSafely(
               AsyncRequests.newRequest( addr.unassign( ).getCallback( ) ).then( 
                 new UnconditionalCallback( ) {
                   @Override
@@ -318,12 +318,12 @@ public class Addresses extends AbstractNamedRegistry<Address> implements EventLi
   
   public static void updatePublicIP( final String privateIp,
                                      final String publicIp ) {
-    updatePublicIPOnMatch( privateIp, null, publicIp );
+    updatePublicIPOnMatch( privateIp, null, Functions.constant( publicIp ) );
   }
 
   public static void updatePublicIPOnMatch( final String privateIp,
                                             @Nullable final String expectedPublicIp,
-                                            final String publicIp
+                                            final Function<? super VmInstance, String> publicIpSupplier
   ) {
     Entities.asTransaction( VmInstance.class, new Predicate<Void>() {
       @Override
@@ -331,7 +331,7 @@ public class Addresses extends AbstractNamedRegistry<Address> implements EventLi
         try {
           final VmInstance vm = VmInstances.lookupByPrivateIp( privateIp );
           if ( expectedPublicIp == null || expectedPublicIp.equals( vm.getPublicAddress() ) ) {
-            vm.updatePublicAddress( publicIp );
+            vm.updatePublicAddress( publicIpSupplier.apply( vm ) );
           }
         } catch ( NoSuchElementException e ) {
           LOG.debug( "Instance not found for private IP " + privateIp );

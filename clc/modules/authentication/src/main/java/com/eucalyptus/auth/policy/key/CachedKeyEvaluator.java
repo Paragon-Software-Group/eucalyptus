@@ -1,5 +1,5 @@
 /*************************************************************************
- * Copyright 2009-2014 Eucalyptus Systems, Inc.
+ * Copyright 2009-2012 Eucalyptus Systems, Inc.
  *
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -64,26 +64,19 @@ package com.eucalyptus.auth.policy.key;
 
 import java.util.Map;
 import com.eucalyptus.auth.AuthException;
-import com.eucalyptus.system.Ats;
 import com.google.common.collect.Maps;
 
 public class CachedKeyEvaluator {
-
-  private final Map<String,String> evaluatedKeys;
-  private final Map<Class<? extends Key>, String> cache = Maps.newHashMap( );
   
-  public CachedKeyEvaluator( Map<String,String> evaluatedKeys ) {
-    this.evaluatedKeys = evaluatedKeys;
+  private Map<Class<? extends Key>, String> cache = Maps.newHashMap( );
+  
+  public CachedKeyEvaluator( ) {
   }
   
   public String getValue( final Key key ) throws AuthException {
     String value = cache.get( key.getClass( ) );
     if ( value == null ) {
-      final PolicyKey policyKey = Ats.from( key.getClass( ) ).get( PolicyKey.class );
-      value = policyKey==null ? null : evaluatedKeys.get( policyKey.value() );
-      if ( value == null ) {
-        value = key.value( );
-      }
+      value = key.value( );
       cache.put( key.getClass( ), value );
     }
     return value;

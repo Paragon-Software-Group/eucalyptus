@@ -62,7 +62,6 @@
 
 package com.eucalyptus.cluster;
 
-import static com.eucalyptus.auth.policy.PolicySpec.*;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.HashMap;
@@ -74,8 +73,7 @@ import java.util.concurrent.ConcurrentSkipListSet;
 import org.apache.log4j.Logger;
 import org.mule.api.MuleException;
 import org.mule.api.lifecycle.Startable;
-import com.eucalyptus.auth.Permissions;
-import com.eucalyptus.compute.common.CloudMetadatas;
+import com.eucalyptus.cloud.CloudMetadatas;
 import com.eucalyptus.cluster.ResourceState.VmTypeAvailability;
 import com.eucalyptus.component.Component;
 import com.eucalyptus.component.ComponentId;
@@ -85,13 +83,14 @@ import com.eucalyptus.component.ServiceUris;
 import com.eucalyptus.component.Topology;
 import com.eucalyptus.component.id.ClusterController;
 import com.eucalyptus.component.id.Eucalyptus;
-import com.eucalyptus.context.Context;
 import com.eucalyptus.context.Contexts;
 import com.eucalyptus.node.Nodes;
+import com.eucalyptus.objectstorage.Walrus;
 import com.eucalyptus.tags.Filter;
 import com.eucalyptus.tags.FilterSupport;
 import com.eucalyptus.tags.Filters;
 import com.eucalyptus.util.EucalyptusCloudException;
+import com.eucalyptus.util.async.AsyncRequests;
 import com.eucalyptus.vm.VmInstance;
 import com.eucalyptus.vm.VmInstances;
 import com.eucalyptus.vm.VmInstances.TerminatedInstanceException;
@@ -142,15 +141,8 @@ public class ClusterEndpoint implements Startable {
   }
   
   public MigrateInstancesResponseType migrateInstances( final MigrateInstancesType request ) throws EucalyptusCloudException {
-    final MigrateInstancesResponseType reply = request.getReply( );
-    final Context context = Contexts.lookup( );
-    if ( !context.isAdministrator( ) || !Permissions.isAuthorized(
-        VENDOR_EC2,
-        EC2_RESOURCE_INSTANCE,
-        "",
-        null,
-        EC2_MIGRATEINSTANCES,
-        context.getAuthContext() )  ) {
+    MigrateInstancesResponseType reply = request.getReply( );
+    if ( !Contexts.lookup( ).hasAdministrativePrivileges( ) ) {
       throw new EucalyptusCloudException( "Authorization failed." );
     }
     if ( !Strings.isNullOrEmpty( request.getSourceHost( ) ) ) {

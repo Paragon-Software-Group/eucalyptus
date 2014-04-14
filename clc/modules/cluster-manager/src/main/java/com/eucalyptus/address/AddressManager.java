@@ -1,5 +1,5 @@
 /*************************************************************************
- * Copyright 2009-2013 Eucalyptus Systems, Inc.
+ * Copyright 2009-2012 Eucalyptus Systems, Inc.
  *
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -66,10 +66,7 @@ import java.util.Collections;
 import java.util.NoSuchElementException;
 import org.apache.log4j.Logger;
 import com.eucalyptus.auth.principal.Principals;
-import com.eucalyptus.compute.ClientComputeException;
-import com.eucalyptus.compute.common.CloudMetadatas;
-import com.eucalyptus.compute.identifier.InvalidResourceIdentifier;
-import com.eucalyptus.compute.identifier.ResourceIdentifiers;
+import com.eucalyptus.cloud.CloudMetadatas;
 import com.eucalyptus.context.Context;
 import com.eucalyptus.context.Contexts;
 import com.eucalyptus.records.Logs;
@@ -82,7 +79,6 @@ import com.eucalyptus.util.async.UnconditionalCallback;
 import com.eucalyptus.vm.VmInstance;
 import com.eucalyptus.vm.VmInstances;
 import com.google.common.base.Predicate;
-import com.google.common.base.Strings;
 import com.google.common.collect.Iterables;
 import edu.ucsb.eucalyptus.msgs.AddressInfoType;
 import edu.ucsb.eucalyptus.msgs.AllocateAddressResponseType;
@@ -132,7 +128,7 @@ public class AddressManager {
   public DescribeAddressesResponseType describe( DescribeAddressesType request ) throws EucalyptusCloudException {
     final DescribeAddressesResponseType reply = ( DescribeAddressesResponseType ) request.getReply( );
     final Context ctx = Contexts.lookup( );
-    final boolean isAdmin = ctx.isAdministrator( );
+    final boolean isAdmin = ctx.hasAdministrativePrivileges();
     final boolean verbose = isAdmin && request.getPublicIpsSet().remove( "verbose" ) ;
     final Predicate<? super Address> filter = CloudMetadatas.filteringFor( Address.class )
         .byId( request.getPublicIpsSet() )
@@ -159,14 +155,13 @@ public class AddressManager {
   public AssociateAddressResponseType associate( final AssociateAddressType request ) throws Exception {
     AssociateAddressResponseType reply = ( AssociateAddressResponseType ) request.getReply( );
     reply.set_return( false );
-    final String instanceId = normalizeInstanceIdentifier( request.getInstanceId( ) );
     final Address address = RestrictedTypes.doPrivileged( request.getPublicIp( ), Address.class );
     if ( !address.isAllocated( ) ) {
       throw new EucalyptusCloudException( "Cannot associate an address which is not allocated: " + request.getPublicIp( ) );
-    } else if ( !Contexts.lookup( ).isAdministrator( ) && !Contexts.lookup( ).getUserFullName( ).asAccountFullName( ).getAccountNumber( ).equals( address.getOwner( ).getAccountNumber( ) ) ) {
+    } else if ( !Contexts.lookup( ).hasAdministrativePrivileges( ) && !Contexts.lookup( ).getUserFullName( ).asAccountFullName( ).getAccountNumber( ).equals( address.getOwner( ).getAccountNumber( ) ) ) {
       throw new EucalyptusCloudException( "Cannot associate an address which is not allocated to your account: " + request.getPublicIp( ) );
     }
-    final VmInstance vm = RestrictedTypes.doPrivileged( instanceId, VmInstance.class );
+    final VmInstance vm = RestrictedTypes.doPrivileged( request.getInstanceId( ), VmInstance.class );
     final VmInstance oldVm = findCurrentAssignedVm( address );
     final Address oldAddr = findVmExistingAddress( vm );
     final boolean oldAddrSystem = oldAddr != null
@@ -177,18 +172,19 @@ public class AddressManager {
     if ( oldAddr != null && address.equals( oldAddr ) ) {
       return reply;
     }
-
+    
     final UnconditionalCallback assignTarget = new UnconditionalCallback( ) {
       public void fire( ) {
-        AddressingDispatcher.dispatch(            AsyncRequests.newRequest( address.assign( vm ).getCallback() ).then(
-                new Callback.Success<BaseMessage>() {
+        AsyncRequests.dispatchSafely( 
+            AsyncRequests.newRequest( address.assign( vm ).getCallback( ) ).then( 
+                new Callback.Success<BaseMessage>( ) {
                   @Override
                   public void fire( BaseMessage response ) {
                     Addresses.updatePublicIpByInstanceId( vm.getInstanceId(), address.getName() );
                   }
-                }
-            ),
-            vm.getPartition() );
+                } 
+            ), 
+            vm.getPartition( ) );
         if ( oldVm != null ) {
           Addresses.system( oldVm );
         }
@@ -198,9 +194,9 @@ public class AddressManager {
     final UnconditionalCallback unassignBystander = new UnconditionalCallback( ) {
       public void fire( ) {
         if ( oldAddr != null ) {
-          AddressingDispatcher.dispatch(
-              AsyncRequests.newRequest( oldAddr.unassign().getCallback() ).then( assignTarget ),
-              vm.getPartition() );
+          AsyncRequests.dispatchSafely( 
+              AsyncRequests.newRequest( oldAddr.unassign( ).getCallback( ) ).then( assignTarget ), 
+              vm.getPartition( ) );
         } else {
           assignTarget.fire( );
         }
@@ -208,9 +204,9 @@ public class AddressManager {
     };
     
     if ( address.isAssigned( ) ) {
-      AddressingDispatcher.dispatch(
-          AsyncRequests.newRequest( address.unassign().getCallback() ).then( unassignBystander ),
-          oldVm.getPartition() );
+      AsyncRequests.dispatchSafely( 
+          AsyncRequests.newRequest( address.unassign( ).getCallback( ) ).then( unassignBystander ),
+          oldVm.getPartition( ) );
     } else {
       unassignBystander.fire( );
     }
@@ -249,7 +245,7 @@ public class AddressManager {
     final Address address = RestrictedTypes.doPrivileged( request.getPublicIp( ), Address.class );
     reply.set_return( true );
     final String vmId = address.getInstanceId( );
-    if ( address.isSystemOwned( ) && !ctx.isAdministrator( ) ) {
+    if ( address.isSystemOwned( ) && !ctx.hasAdministrativePrivileges( ) ) {
       throw new EucalyptusCloudException( "Only administrators can unassign system owned addresses: " + address.toString( ) );
     } else {
       try {
@@ -267,7 +263,7 @@ public class AddressManager {
           }
         };
 
-        AddressingDispatcher.dispatch(
+        AsyncRequests.dispatchSafely(
             AsyncRequests.newRequest( address.unassign().getCallback() ).then( systemAddressAssignmentCallback ),
             vm.getPartition() ); 
       } catch ( Exception e ) {
@@ -278,23 +274,4 @@ public class AddressManager {
     }
     return reply;
   }
-
-  private static String normalizeIdentifier( final String identifier,
-                                             final String prefix,
-                                             final boolean required,
-                                             final String message ) throws ClientComputeException {
-    try {
-      return Strings.emptyToNull( identifier ) == null && !required ?
-          null :
-          ResourceIdentifiers.parse( prefix, identifier ).getIdentifier( );
-    } catch ( final InvalidResourceIdentifier e ) {
-      throw new ClientComputeException( "InvalidParameterValue", String.format( message, e.getIdentifier( ) ) );
-    }
-  }
-
-  private static String normalizeInstanceIdentifier( final String identifier ) throws EucalyptusCloudException {
-    return normalizeIdentifier(
-        identifier, VmInstance.ID_PREFIX, true, "Value (%s) for parameter instanceId is invalid. Expected: 'i-...'." );
-  }
-
 }

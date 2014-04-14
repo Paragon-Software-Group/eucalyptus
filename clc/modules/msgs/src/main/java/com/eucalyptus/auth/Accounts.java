@@ -63,9 +63,7 @@
 package com.eucalyptus.auth;
 
 import java.security.cert.X509Certificate;
-import java.util.Collection;
 import java.util.List;
-import java.util.Map;
 import java.util.Set;
 import org.apache.log4j.Logger;
 import com.eucalyptus.auth.api.AccountProvider;
@@ -76,11 +74,9 @@ import com.eucalyptus.auth.principal.Account;
 import com.eucalyptus.auth.principal.Certificate;
 import com.eucalyptus.auth.principal.Group;
 import com.eucalyptus.auth.principal.InstanceProfile;
-import com.eucalyptus.auth.principal.Policy;
 import com.eucalyptus.auth.principal.Role;
 import com.eucalyptus.auth.principal.RoleUser;
 import com.eucalyptus.auth.principal.User;
-import com.eucalyptus.util.Exceptions;
 import com.google.common.base.Function;
 
 /**
@@ -150,27 +146,11 @@ public class Accounts {
   public static void deleteAccount( String accountName, boolean forceDeleteSystem, boolean recursive ) throws AuthException {
     Accounts.getAccountProvider( ).deleteAccount( accountName, forceDeleteSystem, recursive );
   }
-
-  public static int countAccounts( ) throws AuthException {
-    return Accounts.getAccountProvider().countAccounts();
-  }
-
-  public static int countUsers( ) throws AuthException {
-    return Accounts.getAccountProvider().countUsers();
-  }
-
-  public static int countGroups( ) throws AuthException {
-    return Accounts.getAccountProvider().countGroups();
-  }
-
+  
   public static List<Account> listAllAccounts( ) throws AuthException {
     return Accounts.getAccountProvider( ).listAllAccounts( );
   }
-
-  public static List<Account> listAccountsByStatus( final User.RegistrationStatus status ) throws AuthException {
-    return Accounts.getAccountProvider( ).listAccountsByStatus( status );
-  }
-
+  
   public static Account addSystemAccount( ) throws AuthException {
     return Accounts.getAccountProvider( ).addAccount( Account.SYSTEM_ACCOUNT );
   }
@@ -203,32 +183,7 @@ public class Accounts {
   public static User lookupUserByCertificate( X509Certificate cert ) throws AuthException {
     return Accounts.getAccountProvider( ).lookupUserByCertificate( cert );
   }
-
-  public static List<User> listUsersForAccounts( final Collection<String> accountIds,
-                                                 final boolean eager ) throws AuthException {
-    return Accounts.getAccountProvider( ).listUsersForAccounts( accountIds, eager );
-  }
-
-  public static List<Group> listGroupsForAccounts( final Collection<String> accountIds ) throws AuthException {
-    return Accounts.getAccountProvider( ).listGroupsForAccounts( accountIds );
-  }
-
-  public static Map<String,List<Policy>> listPoliciesForUsers( final Collection<String> userIds ) throws AuthException {
-    return Accounts.getAccountProvider( ).listPoliciesForUsers( userIds );
-  }
-
-  public static Map<String,List<Policy>> listPoliciesForGroups( final Collection<String> groupIds ) throws AuthException {
-    return Accounts.getAccountProvider( ).listPoliciesForGroups( groupIds );
-  }
-
-  public static Map<String,List<Certificate>> listSigningCertificatesForUsers( final Collection<String> userIds ) throws AuthException {
-    return Accounts.getAccountProvider( ).listSigningCertificatesForUsers( userIds );
-  }
-
-  public static Map<String,List<AccessKey>> listAccessKeysForUsers( final Collection<String> userIds ) throws AuthException {
-    return Accounts.getAccountProvider( ).listAccessKeysForUsers( userIds );
-  }
-
+  
   public static Group lookupGroupById( String groupId ) throws AuthException {
     return Accounts.getAccountProvider( ).lookupGroupById( groupId );
   }
@@ -269,10 +224,6 @@ public class Accounts {
 
   public static User roleAsUser( final Role role ) throws AuthException {
     return new RoleUser( role, role.getAccount().lookupAdmin() );
-  }
-
-  public static String getAccountFullName( Account account ) {
-    return "/" + account.getName( );
   }
 
   public static String getUserFullName( User user ) {
@@ -327,11 +278,7 @@ public class Accounts {
                                   final String type,
                                   final String path,
                                   final String name ) throws AuthException {
-    return new EuareResourceName( account.getAccountNumber(), type, path, name ).toString( );
-  }
-
-  public static boolean isRoleIdentifier( final String identifier ) {
-    return identifier.startsWith( "ARO" );
+    return new EuareResourceName( account.getAccountNumber(), type, path, name ).toString();
   }
 
   public static void normalizeUserInfo( ) throws AuthException {
@@ -351,20 +298,8 @@ public class Accounts {
     return AccountStringProperties.ACCOUNT_NUMBER;
   }
 
-  public static Function<User,String> toUserAccountNumber() {
-    return UserStringProperties.ACCOUNT_NUMBER;
-  }
-
   public static Function<User,String> toUserId() {
     return UserStringProperties.USER_ID;
-  }
-
-  public static Function<Group,String> toGroupAccountNumber() {
-    return GroupStringProperties.ACCOUNT_NUMBER;
-  }
-
-  public static Function<Group,String> toGroupId() {
-    return GroupStringProperties.GROUP_ID;
   }
 
   private enum AccountStringProperties implements Function<Account,String> {
@@ -377,39 +312,10 @@ public class Accounts {
   }
 
   private enum UserStringProperties implements Function<User,String> {
-    ACCOUNT_NUMBER {
-      @Override
-      public String apply( final User user ) {
-        try {
-          return user.getAccountNumber( );
-        } catch ( AuthException e ) {
-          throw Exceptions.toUndeclared( e );
-        }
-      }
-    },
     USER_ID {
       @Override
       public String apply( final User user ) {
-        return user.getUserId( );
-      }
-    }
-  }
-
-  private enum GroupStringProperties implements Function<Group,String> {
-    ACCOUNT_NUMBER {
-      @Override
-      public String apply( final Group group ) {
-        try {
-          return group.getAccountNumber( );
-        } catch ( AuthException e ) {
-          throw Exceptions.toUndeclared( e );
-        }
-      }
-    },
-    GROUP_ID {
-      @Override
-      public String apply( final Group group ) {
-        return group.getGroupId( );
+        return user.getUserId();
       }
     }
   }

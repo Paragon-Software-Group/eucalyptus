@@ -26,19 +26,12 @@ import com.eucalyptus.auth.PolicyParseException;
 /**
  *
  */
-public interface AuthorizedPrincipal extends AccountScopedPrincipal {
+public interface AuthorizedPrincipal extends BasePrincipal {
+
+  Account getAccount( ) throws AuthException;
 
   List<Policy> getPolicies( ) throws AuthException;
-
-  /**
-   * Add a policy, fail if exists.
-   */
   Policy addPolicy( String name, String policy ) throws AuthException, PolicyParseException;
-
-  /**
-   * Add or update the named policy.
-   */
-  Policy putPolicy( String name, String policy ) throws AuthException, PolicyParseException;
   void removePolicy( String name ) throws AuthException;
 
   List<Authorization> lookupAuthorizations( String resourceType ) throws AuthException;

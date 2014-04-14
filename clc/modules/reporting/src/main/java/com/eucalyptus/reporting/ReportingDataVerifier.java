@@ -27,8 +27,6 @@ import java.util.Set;
 import javax.annotation.Nonnull;
 import javax.annotation.Nullable;
 import javax.persistence.EntityTransaction;
-
-import com.eucalyptus.objectstorage.entities.Bucket;
 import org.hibernate.Criteria;
 import org.hibernate.ScrollMode;
 import org.hibernate.ScrollableResults;
@@ -46,8 +44,8 @@ import com.eucalyptus.blockstorage.Volume;
 import com.eucalyptus.entities.Entities;
 import com.eucalyptus.entities.TransactionException;
 import com.eucalyptus.entities.Transactions;
-import com.eucalyptus.objectstorage.entities.ObjectEntity;
-import com.eucalyptus.objectstorage.util.ObjectStorageProperties;
+import com.eucalyptus.objectstorage.entities.ObjectInfo;
+import com.eucalyptus.objectstorage.util.WalrusProperties;
 import com.eucalyptus.reporting.domain.ReportingAccountCrud;
 import com.eucalyptus.reporting.domain.ReportingUserCrud;
 import com.eucalyptus.reporting.event_store.ReportingElasticIpAttachEvent;
@@ -221,20 +219,13 @@ public final class ReportingDataVerifier {
           if ( address != null && ensureUserAndAccount( verifiedUserIds, address.getUserId() ) ) {
             store.insertCreateEvent( address.getCreationTimestamp().getTime(), address.getUserId(), address.getDisplayName() );
           }
-        } else if ( ObjectEntity.class.equals( holder.type ) ) {
+        } else if ( ObjectInfo.class.equals( holder.type ) ) {
           final ReportingS3ObjectEventStore store = ReportingS3ObjectEventStore.getInstance();
           final S3ObjectKey key = (S3ObjectKey) resource.resourceKey;
-          final ObjectEntity objectInfo = findObjectInfo( key );
-          String accountId = null;
-          try{
-        	  accountId = Accounts.lookupAccountById(objectInfo.getOwnerCanonicalId()).getAccountNumber();
-          } catch(Exception e) { 
-        	  accountId = null; 
-          }
-          
-          final User user = objectInfo==null ? null : getAccountAdmin( accountNumberToAccountAdminMap, accountId);
+          final ObjectInfo objectInfo = findObjectInfo( key );
+          final User user = objectInfo==null ? null : getAccountAdmin( accountNumberToAccountAdminMap, objectInfo.getOwnerId() );
           if ( objectInfo != null && user != null && ensureUserAndAccount( verifiedUserIds, user.getUserId() ) ) {
-            store.insertS3ObjectCreateEvent( objectInfo.getBucket().getBucketName(), objectInfo.getObjectKey(), objectInfo.getVersionId(), objectInfo.getSize(), objectInfo.getCreationTimestamp().getTime(), user.getUserId() );
+            store.insertS3ObjectCreateEvent( objectInfo.getBucketName(), objectInfo.getObjectKey(), objectInfo.getVersionId(), objectInfo.getSize(), objectInfo.getCreationTimestamp().getTime(), user.getUserId() );
           }
         } else if ( Snapshot.class.equals( holder.type ) ) {
           final ReportingVolumeSnapshotEventStore store = ReportingVolumeSnapshotEventStore.getInstance();
@@ -261,7 +252,7 @@ public final class ReportingDataVerifier {
         if ( Address.class.equals( holder.type ) ) {
           final ReportingElasticIpEventStore store = ReportingElasticIpEventStore.getInstance();
           store.insertDeleteEvent( resource.resourceKey.toString(), timestamp );
-        } else if ( ObjectEntity.class.equals( holder.type ) ) {
+        } else if ( ObjectInfo.class.equals( holder.type ) ) {
           final ReportingS3ObjectEventStore store = ReportingS3ObjectEventStore.getInstance();
           final S3ObjectKey key = (S3ObjectKey) resource.resourceKey;
           store.insertS3ObjectDeleteEvent( key.bucketName, key.objectKey, key.objectVersion, timestamp );
@@ -373,18 +364,18 @@ public final class ReportingDataVerifier {
         Predicates.compose( Predicates.equalTo( uuid ), naturalId() ) ), null );
   }
 
-  private static ObjectEntity findObjectInfo( final S3ObjectKey key ) {
+  private static ObjectInfo findObjectInfo( final S3ObjectKey key ) {
     try {
-      final ObjectEntity objectInfo = new ObjectEntity();
-      objectInfo.setBucket( new Bucket(key.bucketName));
-      objectInfo.setObjectKey(key.objectKey);
-      objectInfo.setVersionId( key.objectVersion==null ? ObjectStorageProperties.NULL_VERSION_ID : key.objectVersion );
-      final List<ObjectEntity> infos = Transactions.findAll( objectInfo );
+      final ObjectInfo objectInfo = new ObjectInfo();
+      objectInfo.setBucketName( key.bucketName );
+      objectInfo.setObjectKey( key.objectKey );
+      objectInfo.setVersionId( key.objectVersion==null ? WalrusProperties.NULL_VERSION_ID : key.objectVersion );
+      final List<ObjectInfo> infos = Transactions.findAll( objectInfo );
       if ( infos.isEmpty() ) {
         return null;
       }
-      ObjectEntity result = infos.get( 0 );
-      for ( final ObjectEntity current : infos ) {
+      ObjectInfo result = infos.get( 0 );
+      for ( final ObjectInfo current : infos ) {
         if ( current.getCreationTimestamp().after( result.getCreationTimestamp() ) ) {
           result = current;
         }
@@ -540,10 +531,10 @@ public final class ReportingDataVerifier {
         }
 
         // S3 Objects
-        for ( final ObjectEntity objectInfo : Transactions.findAll( new ObjectEntity() ) ) {
-          if ( Boolean.FALSE.equals(objectInfo.getIsDeleteMarker()) ) {
-            view.add( ObjectEntity.class, s3ObjectResource(
-                objectInfo.getBucket().getBucketName(),
+        for ( final ObjectInfo objectInfo : Transactions.findAll( new ObjectInfo() ) ) {
+          if ( Boolean.FALSE.equals(objectInfo.getDeleted()) ) {
+            view.add( ObjectInfo.class, s3ObjectResource(
+                objectInfo.getBucketName(),
                 objectInfo.getObjectKey(),
                 objectInfo.getVersionId() ) );
           }
@@ -709,7 +700,7 @@ public final class ReportingDataVerifier {
       }
 
       for ( final S3ObjectKey s3ObjectKey : s3ObjectList ) {
-        view.add( ObjectEntity.class, ReportingDataVerifier.s3ObjectResource(s3ObjectKey) );
+        view.add( ObjectInfo.class, ReportingDataVerifier.s3ObjectResource(s3ObjectKey) );
       }
 
       for ( final Map.Entry<String,RelationTimestamp> volumeEntry : volumeRelationMap.entrySet() ) {

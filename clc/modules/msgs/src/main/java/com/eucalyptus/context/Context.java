@@ -1,5 +1,5 @@
 /*************************************************************************
- * Copyright 2009-2014 Eucalyptus Systems, Inc.
+ * Copyright 2009-2013 Eucalyptus Systems, Inc.
  *
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -63,17 +63,12 @@
 package com.eucalyptus.context;
 
 import static java.util.Collections.unmodifiableMap;
-import com.eucalyptus.auth.AuthContext;
-import com.eucalyptus.auth.AuthContextSupplier;
 import static com.google.common.collect.Maps.newHashMap;
-import edu.ucsb.eucalyptus.msgs.EvaluatedIamConditionKey;
 import java.lang.ref.WeakReference;
 import java.net.InetAddress;
 import java.net.InetSocketAddress;
-import java.util.Collections;
 import java.util.Map;
 import java.util.UUID;
-import javax.annotation.Nullable;
 import javax.security.auth.Subject;
 import org.apache.log4j.Logger;
 import org.jboss.netty.channel.Channel;
@@ -85,20 +80,14 @@ import org.mule.api.MuleEvent;
 import com.eucalyptus.auth.Accounts;
 import com.eucalyptus.auth.AuthException;
 import com.eucalyptus.auth.Contract;
-import com.eucalyptus.auth.Permissions;
 import com.eucalyptus.auth.principal.Account;
 import com.eucalyptus.auth.principal.Principals;
-import com.eucalyptus.auth.principal.Role;
 import com.eucalyptus.auth.principal.User;
 import com.eucalyptus.auth.principal.UserFullName;
 import com.eucalyptus.http.MappingHttpRequest;
 import com.eucalyptus.records.EventRecord;
 import com.eucalyptus.records.EventType;
-import com.eucalyptus.util.CollectionUtils;
 import com.eucalyptus.ws.server.Statistics;
-import com.google.common.base.Optional;
-import com.google.common.collect.Maps;
-import edu.ucsb.eucalyptus.msgs.BaseCallerContext;
 import edu.ucsb.eucalyptus.msgs.BaseMessage;
 
 public class Context {
@@ -109,13 +98,11 @@ public class Context {
   private final MappingHttpRequest     httpRequest;
   private final Channel                channel;
   private final boolean                channelManaged;
-  private WeakReference<MuleEvent>     muleEvent = new WeakReference<>( null );
+  private WeakReference<MuleEvent>     muleEvent = new WeakReference<MuleEvent>( null );
   private User                         user      = null;
-  private String                       securityToken = null;
   private Subject                      subject   = null;
   private Map<Contract.Type, Contract> contracts = null;
-  private Boolean isSystemAdmin;
-  private Boolean isSystemUser;
+  private Boolean                      isSystemAdmin;
 
   Context( ) {
     this.correlationId = null;
@@ -193,80 +180,20 @@ public class Context {
       this.user = user;
     }
   }
-
-  public String getSecurityToken() {
-    return securityToken;
-  }
-
-  public void setSecurityToken(String securityToken) {
-    this.securityToken = securityToken;
-  }
-
-    public UserFullName getUserFullName( ) {
+  
+  public UserFullName getUserFullName( ) {
     return UserFullName.getInstance( this.getUser( ) );
   }
-
-  /**
-   * Context is system privileged acting as user.
-   */
-  public boolean isPrivileged() {
-    return false;
-  }
-
-  /**
-   * Context is privileged to perform any operation.
-   */
+  
   public boolean hasAdministrativePrivileges( ) {
     if ( isSystemAdmin == null ) {
       isSystemAdmin = this.getUser( ).isSystemAdmin( );
     }
     return isSystemAdmin;
   }
-
-  /**
-   * Context may be permitted to perform some administrative actions.
-   *
-   * Policy should be evaluated to determine actual permissions.
-   */
-  public boolean isAdministrator( ) {
-    if ( isSystemUser == null ) {
-      isSystemUser = this.getUser( ).isSystemUser();
-    }
-    return isSystemUser;
-  }
-
-  /**
-   * Context uses impersonation.
-   *
-   * <p>This does not imply any privilege. Do not use this for authorization.</p>
-   *
-   * @return true if context identity is impersonated
-   * @see #isPrivileged
-   */
-  public boolean isImpersonated( ) {
-    return false;
-  }
-
-  /**
-   * Evaluate IAM condition keys that are context sensitive.
-   *
-   * @return The evaluated keys.
-   */
-  public Map<String,String> evaluateKeys( ) throws AuthException {
-    return Permissions.evaluateHostKeys( );
-  }
-
+  
   public User getUser( ) {
     return check( this.user );
-  }
-
-  public AuthContextSupplier getAuthContext( ) {
-    return new AuthContextSupplier( ){
-      @Override
-      public AuthContext get( ) throws AuthException {
-        return Permissions.createAuthContext( getUser( ), Collections.<String,String>emptyMap() );
-      }
-    };
   }
   
   void setMuleEvent( MuleEvent event ) {
@@ -284,8 +211,7 @@ public class Context {
       return this.httpRequest.getServicePath( ).replaceAll( "/services/", "" ).replaceAll( "[/?].+", "" );
     }
   }
-
-  @Nullable
+  
   public Subject getSubject( ) {
     return check( this.subject );
   }
@@ -346,20 +272,12 @@ public class Context {
   static Context maybeImpersonating( Context ctx ) {
     ctx.initRequest();
     if ( ctx.request != null ) {
-      final String userId = Optional.fromNullable( ctx.request.getUserId( ) )
-          .or( Optional.fromNullable( ctx.request.getEffectiveUserId( ) ) )
-          .orNull( );
+      final String userId = ctx.request.getEffectiveUserId( );
       if ( userId != null &&
            !Principals.isFakeIdentify(userId) &&
            ctx.hasAdministrativePrivileges( ) ) {
         try {
-          final User user;
-          if ( Accounts.isRoleIdentifier( userId ) ) {
-            Role role = Accounts.lookupRoleById( userId );
-            user = Accounts.roleAsUser( role );
-          } else {
-            user = Accounts.lookupUserById( userId );
-          }
+          final User user = Accounts.lookupUserById( userId );
           return createImpersona( ctx, user );
         } catch ( AuthException ex ) {
           return ctx;
@@ -372,9 +290,6 @@ public class Context {
   private static Context createImpersona( final Context ctx, final User user ) {
     return new DelegatingContextSupport( ctx ) {
       private Boolean isSystemAdmin;
-      private Boolean isSystemUser;
-      private Subject subject = new Subject( );
-      private Map<String,String> evaluatedKeys;
 
       @Override
       public User getUser( ) {
@@ -397,71 +312,11 @@ public class Context {
       }
 
       @Override
-      public boolean isPrivileged( ) {
-        return Principals.systemUser( ).getName( ).equals( ctx.request.getEffectiveUserId( ) );
-      }
-
-      @Override
-      public boolean isAdministrator( ) {
-        if ( isSystemUser == null ) {
-          isSystemUser = this.getUser( ).isSystemUser();
-        }
-        return isSystemUser;
-      }
-
-      @Override
       public boolean hasAdministrativePrivileges( ) {
         if ( isSystemAdmin == null ) {
           isSystemAdmin = user.isSystemAdmin();
         }
         return isSystemAdmin;
-      }
-
-      @Override
-      public boolean isImpersonated( ) {
-        return true;
-      }
-
-      @Override
-      public Subject getSubject( ) {
-        return subject;
-      }
-
-      @Override
-      public void setSubject( final Subject subject ) {
-        this.subject = subject;
-      }
-
-      @Override
-      public String getSecurityToken( ) {
-        return null;
-      }
-
-      @Override
-      public Map<String, String> evaluateKeys( ) throws AuthException {
-        if ( evaluatedKeys == null ) {
-          final BaseCallerContext context = super.getRequest( ).getCallerContext( );
-          if ( context == null ) {
-            evaluatedKeys = Collections.emptyMap();
-          } else {
-            evaluatedKeys = CollectionUtils.putAll(
-                context.getEvaluatedKeys( ),
-                Maps.<String,String>newHashMap( ),
-                EvaluatedIamConditionKey.key(),
-                EvaluatedIamConditionKey.value() );
-          }
-        }
-        return evaluatedKeys;
-      }
-
-      @Override
-      public AuthContextSupplier getAuthContext( ) {
-        return new AuthContextSupplier( ){
-          @Override
-          public AuthContext get( ) throws AuthException {
-            return Permissions.createAuthContext( getUser( ), evaluateKeys( ) );
-          }
-        };
       }
     };
   }

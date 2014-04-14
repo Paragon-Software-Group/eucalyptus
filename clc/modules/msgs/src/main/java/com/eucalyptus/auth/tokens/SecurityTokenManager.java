@@ -19,7 +19,6 @@
  ************************************************************************/
 package com.eucalyptus.auth.tokens;
 
-import static com.eucalyptus.auth.principal.TemporaryAccessKey.TemporaryKeyType;
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
@@ -46,7 +45,6 @@ import com.eucalyptus.auth.Accounts;
 import com.eucalyptus.auth.AuthException;
 import com.eucalyptus.auth.principal.AccessKey;
 import com.eucalyptus.auth.principal.Role;
-import com.eucalyptus.auth.principal.TemporaryAccessKey;
 import com.eucalyptus.auth.principal.User;
 import com.eucalyptus.bootstrap.SystemIds;
 import com.eucalyptus.crypto.Ciphers;
@@ -74,55 +72,28 @@ public class SecurityTokenManager {
   /**
    * Issue a security token.
    *
-   * <p>The token is tied to the provided access key and will be invalid if the
-   * underlying access key is disabled or is removed.</p>
-   *
-   * <p>The credential associated with the token is of type
-   * TemporaryAccessKey#Session.</p>
-   *
    * @param user The user for the token
    * @param accessKey The originating access key for the token
+   * @param accessToken The originating user token for the token
    * @param durationSeconds The desired duration for the token
    * @return The newly issued security token
    * @throws AuthException If an error occurs
-   * @see com.eucalyptus.auth.principal.TemporaryAccessKey.TemporaryKeyType#Session
    */
   @Nonnull
   public static SecurityToken issueSecurityToken( @Nonnull  final User user,
                                                   @Nullable final AccessKey accessKey,
+                                                  @Nullable final String accessToken,
                                                             final int durationSeconds ) throws AuthException {
-    return instance.doIssueSecurityToken( user, accessKey, durationSeconds );
+    return instance.doIssueSecurityToken( user, accessKey, accessToken, durationSeconds );
   }
 
   /**
    * Issue a security token.
-   *
-   * <p>The credential associated with the token is of type
-   * TemporaryAccessKey#Access.</p>
-   *
-   * @param user The user for the token
-   * @param durationSeconds The desired duration for the token
-   * @return The newly issued security token
-   * @throws AuthException If an error occurs
-   * @see com.eucalyptus.auth.principal.TemporaryAccessKey.TemporaryKeyType#Access
-   */
-  @Nonnull
-  public static SecurityToken issueSecurityToken( @Nonnull  final User user,
-                                                  final int durationSeconds ) throws AuthException {
-    return instance.doIssueSecurityToken( user, durationSeconds );
-  }
-
-  /**
-   * Issue a security token.
-   *
-   * <p>The credential associated with the token is of type
-   * TemporaryAccessKey#Role.</p>
    *
    * @param role The role to to assume
    * @param durationSeconds The desired duration for the token
    * @return The newly issued security token
    * @throws AuthException If an error occurs
-   * @see com.eucalyptus.auth.principal.TemporaryAccessKey.TemporaryKeyType#Role
    */
   @Nonnull
   public static SecurityToken issueSecurityToken( @Nonnull final Role role,
@@ -139,90 +110,51 @@ public class SecurityTokenManager {
    * @throws AuthException If an error occurs
    */
   @Nonnull
-  public static TemporaryAccessKey lookupAccessKey( @Nonnull final String accessKeyId,
-                                                    @Nonnull final String token ) throws AuthException {
-    return instance.doLookupAccessKey(accessKeyId, token);
+  public static AccessKey lookupAccessKey( @Nonnull final String accessKeyId,
+                                           @Nonnull final String token ) throws AuthException {
+    return instance.doLookupAccessKey( accessKeyId, token );
   }
 
-    /**
-     * Returns the user corresponding to a role using the specified accessKeyId and security token
-     * @param accessKeyId
-     * @param token
-     * @return
-     * @throws AuthException
-     */
-    @Nonnull
-  public static User lookupUser( @Nonnull final String accessKeyId,
-                                                    @Nonnull final String token ) throws AuthException {
-     return instance.doLookupUser(accessKeyId, token);
-  }
-
-    /**
-   *
+  /**
+   * The accessToken parameter appears redundant but indicates authorization to use the users token.
    */
   @Nonnull
   protected SecurityToken doIssueSecurityToken( @Nonnull  final User user,
                                                 @Nullable final AccessKey accessKey,
+                                                @Nullable final String accessToken,
                                                           final int durationSeconds ) throws AuthException {
     Preconditions.checkNotNull( user, "User is required" );
 
-    final AccessKey key = accessKey != null ?
+    final AccessKey key = accessKey != null || accessToken != null ?
         accessKey :
         Iterables.find(
             Objects.firstNonNull( user.getKeys(), Collections.<AccessKey>emptyList() ),
             AccessKeys.isActive(),
             null );
 
-    if ( key==null )
+    if ( key==null && accessToken==null )
       throw new AuthException("Key not found for user");
 
     final long restrictedDurationMillis =
-        restrictDuration( 36, user.isAccountAdmin(), durationSeconds );
+        restrictDuration( user.isAccountAdmin(), durationSeconds );
 
-    if ( !key.getUser().getUserId().equals( user.getUserId() ) ) {
+    if ( key != null && !key.getUser().getUserId().equals( user.getUserId() ) ) {
       throw new AuthException("Key not valid for user");
-    }
-
-    final EncryptedSecurityToken encryptedToken = new EncryptedSecurityToken(
-        key.getAccessKey(),
-        user.getUserId(),
-        getCurrentTimeMillis(),
-        restrictedDurationMillis );
-    return  new SecurityToken(
-        encryptedToken.getAccessKeyId(),
-        encryptedToken.getSecretKey( key.getSecretKey() ),
-        encryptedToken.encrypt( getEncryptionKey( encryptedToken.getAccessKeyId() ) ),
-        encryptedToken.getExpires()
-        );
-  }
-
-  /**
-   *
-   */
-  @Nonnull
-  protected SecurityToken doIssueSecurityToken( @Nonnull  final User user,
-                                                final int durationSeconds ) throws AuthException {
-    Preconditions.checkNotNull( user, "User is required" );
-
-    final String userToken = user.getToken();
-    if ( userToken == null || userToken.length() < 30 ) {
+    } else if ( key == null &&  accessToken.length() < 30 ) {
       throw new AuthException("Cannot generate token for user");
     }
 
-    final long restrictedDurationMillis =
-        restrictDuration( 36, user.isAccountAdmin(), durationSeconds );
-
     final EncryptedSecurityToken encryptedToken = new EncryptedSecurityToken(
-        null,
+        key!=null ? key.getAccessKey() : null,
         user.getUserId(),
         getCurrentTimeMillis(),
         restrictedDurationMillis );
     return  new SecurityToken(
         encryptedToken.getAccessKeyId(),
-        encryptedToken.getSecretKey( userToken ),
+        encryptedToken.getSecretKey( key == null ? accessToken : key.getSecretKey() ),
         encryptedToken.encrypt( getEncryptionKey( encryptedToken.getAccessKeyId() ) ),
         encryptedToken.getExpires()
-    );
+        );
   }
 
   @Nonnull
@@ -231,7 +163,7 @@ public class SecurityTokenManager {
     Preconditions.checkNotNull( role, "Role is required" );
 
     final long restrictedDurationMillis =
-        restrictDuration( 1, false, durationSeconds );
+        restrictDuration( false, durationSeconds );
 
     if ( role.getSecret()==null || role.getSecret().length() < 30 ) {
       throw new AuthException("Cannot generate token for role");
@@ -250,8 +182,8 @@ public class SecurityTokenManager {
   }
 
   @Nonnull
-  protected TemporaryAccessKey doLookupAccessKey( @Nonnull final String accessKeyId,
-                                                  @Nonnull final String token ) throws AuthException {
+  protected AccessKey doLookupAccessKey( @Nonnull final String accessKeyId,
+                                         @Nonnull final String token ) throws AuthException {
     Preconditions.checkNotNull( accessKeyId, "Access key identifier is required" );
     Preconditions.checkNotNull( token, "Token is required" );
 
@@ -268,29 +200,23 @@ public class SecurityTokenManager {
     final boolean active;
     final String secretKey;
     final User user;
-    final TemporaryKeyType type;
     if ( originatingAccessKeyId != null ) {
       final AccessKey key = lookupAccessKeyById( originatingAccessKeyId );
       active = key.isActive();
       secretKey = encryptedToken.getSecretKey( key.getSecretKey() );
       user = key.getUser();
-      type = TemporaryKeyType.Session;
     } else if ( userId != null ) {
       user = lookupUserById( encryptedToken.getUserId() );
       active = user.isEnabled();
-      secretKey = encryptedToken.getSecretKey( Objects.firstNonNull( user.getToken(), "" ) );
-      type = TemporaryKeyType.Access;
+      secretKey = encryptedToken.getSecretKey( Objects.firstNonNull( user.getToken(), "") );
     } else  {
       final Role role = lookupRoleById( encryptedToken.getRoleId() );
       user = roleAsUser( role );
       active = true;
       secretKey = encryptedToken.getSecretKey( role.getSecret() );
-      type = TemporaryKeyType.Role;
     }
 
-    return new TemporaryAccessKey() {
-      private static final long serialVersionUID = 1L;
-
+    return new AccessKey() {
       @Override public Boolean isActive() {
         return active && encryptedToken.isValid();
       }
@@ -299,24 +225,12 @@ public class SecurityTokenManager {
         return encryptedToken.getAccessKeyId();
       }
 
-      @Override public String getSecurityToken() {
-        return token;
-      }
-
       @Override public String getSecretKey() {
         return secretKey;
       }
 
-      @Override public TemporaryKeyType getType() {
-        return type;
-      }
-
       @Override public Date getCreateDate() {
         return new Date(encryptedToken.getCreated());
-      }
-
-      @Override public Date getExpiryDate() {
-        return new Date(encryptedToken.getExpires());
       }
 
       @Override public User getUser() throws AuthException {
@@ -324,28 +238,11 @@ public class SecurityTokenManager {
       }
 
       @Override public void setActive(final Boolean active) throws AuthException { }
+      @Override public void setCreateDate(final Date createDate) throws AuthException { }
     };
   }
 
-  @Nonnull
-  protected User doLookupUser( @Nonnull final String accessKeyId,
-                                                  @Nonnull final String token ) throws AuthException {
-      Preconditions.checkNotNull( accessKeyId, "Access key identifier is required" );
-      Preconditions.checkNotNull( token, "Token is required" );
-      final EncryptedSecurityToken encryptedToken;
-      try {
-        encryptedToken = EncryptedSecurityToken.decrypt( accessKeyId, getEncryptionKey( accessKeyId ), token );
-      } catch ( GeneralSecurityException e ) {
-          log.debug( e, e );
-          throw new AuthException("Invalid security token");
-      }
-
-      final Role role = lookupRoleById(encryptedToken.getRoleId());
-      User user = roleAsUser( role );
-      return user;
-   }
-
-    protected long getCurrentTimeMillis() {
+  protected long getCurrentTimeMillis() {
     return System.currentTimeMillis();
   }
 
@@ -369,32 +266,16 @@ public class SecurityTokenManager {
     return SystemIds.securityTokenPassword();
   }
 
-  private long restrictDuration( final int maximumDurationHours,
-                                 final boolean isAdmin,
-                                 final int durationSeconds ) throws SecurityTokenValidationException {
-    long durationMillis = durationSeconds == 0 ?
-        TimeUnit.HOURS.toMillis( 12 ) : // use default
-        TimeUnit.SECONDS.toMillis( durationSeconds );
-
-    if ( durationMillis > TimeUnit.HOURS.toMillis( maximumDurationHours ) ) {
-      validationFailure( String.format(
-          "Invalid duration requested, maximum permitted duration is %s seconds.",
-          TimeUnit.HOURS.toSeconds( maximumDurationHours ) ) );
-    }
-
-    if ( durationMillis < TimeUnit.MINUTES.toMillis( 15 ) ) {
-      validationFailure( "Invalid duration requested, minimum permitted duration is 900 seconds." );
-    }
-
-    if ( isAdmin && durationMillis > TimeUnit.HOURS.toMillis( 1 ) ) {
-      durationMillis = TimeUnit.HOURS.toMillis( 1 );
-    }
-
-    return durationMillis;
-  }
-
-  private void validationFailure( final String message ) throws SecurityTokenValidationException {
-    throw new SecurityTokenValidationException( message );
+  private long restrictDuration( final boolean isAdmin,
+                                 final int durationSeconds ) {
+    return Math.max(
+        Math.min(
+            durationSeconds == 0 ?
+                TimeUnit.HOURS.toMillis( 12 ) :
+                TimeUnit.SECONDS.toMillis( durationSeconds ),
+            TimeUnit.HOURS.toMillis( isAdmin ? 1 : 36 )
+        ),
+        TimeUnit.HOURS.toMillis( 1 ) );
   }
 
   private SecretKey getEncryptionKey( final String salt ) {
@@ -541,7 +422,9 @@ public class SecurityTokenManager {
         out.write( iv );
         out.write( cipher.doFinal(toBytes()) );
         return B64.standard.encString( out.toByteArray() );
-      } catch ( GeneralSecurityException | IOException e ) {
+      } catch (GeneralSecurityException e) {
+        throw Exceptions.toUndeclared( e );
+      } catch (IOException e) {
         throw Exceptions.toUndeclared( e );
       }
     }

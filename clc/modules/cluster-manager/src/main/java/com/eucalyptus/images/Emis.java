@@ -1,5 +1,5 @@
 /*************************************************************************
- * Copyright 2009-2014 Eucalyptus Systems, Inc.
+ * Copyright 2009-2012 Eucalyptus Systems, Inc.
  *
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -63,29 +63,20 @@
 package com.eucalyptus.images;
 
 import java.util.NoSuchElementException;
-
 import javax.persistence.EntityTransaction;
 import javax.persistence.PersistenceException;
-
 import org.apache.log4j.Logger;
-
-import com.eucalyptus.compute.common.CloudMetadatas;
-import com.eucalyptus.compute.common.ImageMetadata;
-import com.eucalyptus.compute.common.ImageMetadata.Platform;
-import com.eucalyptus.compute.common.ImageMetadata.StaticDiskImage;
+import com.eucalyptus.cloud.ImageMetadata;
+import com.eucalyptus.cloud.ImageMetadata.Platform;
+import com.eucalyptus.cloud.ImageMetadata.StaticDiskImage;
 import com.eucalyptus.cloud.util.IllegalMetadataAccessException;
 import com.eucalyptus.cloud.util.InvalidMetadataException;
 import com.eucalyptus.cloud.util.MetadataException;
 import com.eucalyptus.cloud.util.NoSuchMetadataException;
-import com.eucalyptus.component.Partition;
 import com.eucalyptus.context.Context;
 import com.eucalyptus.context.Contexts;
 import com.eucalyptus.context.IllegalContextAccessException;
 import com.eucalyptus.entities.Entities;
-import com.eucalyptus.imaging.manifest.BundleImageManifest;
-import com.eucalyptus.imaging.manifest.DownloadManifestException;
-import com.eucalyptus.imaging.manifest.DownloadManifestFactory;
-import com.eucalyptus.imaging.manifest.ImageManifestFile;
 import com.eucalyptus.records.Logs;
 import com.eucalyptus.util.EucalyptusCloudException;
 import com.eucalyptus.util.Exceptions;
@@ -99,8 +90,6 @@ import com.google.common.base.Functions;
 import com.google.common.base.Preconditions;
 import com.google.common.base.Predicate;
 import com.google.common.base.Predicates;
-
-import edu.ucsb.eucalyptus.cloud.VirtualBootRecord;
 import edu.ucsb.eucalyptus.msgs.RunInstancesType;
 import edu.ucsb.eucalyptus.msgs.VmTypeInfo;
 
@@ -108,10 +97,10 @@ public class Emis {
   private static Logger LOG = Logger.getLogger( Emis.class );
   
   enum VBRTypes {
-    MACHINE( "objectstorage://" ),
+    MACHINE( "walrus://" ),
     EBS,
-    KERNEL( "objectstorage://" ),
-    RAMDISK( "objectstorage://" ),
+    KERNEL( "walrus://" ),
+    RAMDISK( "walrus://" ),
     EPHEMERAL,
     SWAP;
     String prefix;
@@ -132,11 +121,11 @@ public class Emis {
     
     @Override
     public ImageInfo apply( final String input ) {
-      if ( CloudMetadatas.isKernelImageIdentifier( input ) ) {
+      if ( input.startsWith( "eki-" ) ) {
         return LookupKernel.INSTANCE.apply( input );
-      } else if ( CloudMetadatas.isRamdiskImageIdentifier( input ) ) {
+      } else if ( input.startsWith( "eri-" ) ) {
         return LookupRamdisk.INSTANCE.apply( input );
-      } else if ( CloudMetadatas.isMachineImageIdentifier( input ) ) {
+      } else if ( input.startsWith( "emi-" ) ) {
         try {
           return LookupMachine.INSTANCE.apply( input );
         } catch ( final Exception ex ) {
@@ -301,35 +290,16 @@ public class Emis {
                                 this.isLinux( ) );
     }
     
-    public VmTypeInfo populateVirtualBootRecord( final VmType vmType, final Partition partition,
-    		final String instanceId) throws MetadataException {
+    public VmTypeInfo populateVirtualBootRecord( final VmType vmType ) throws MetadataException {
       final VmTypeInfo vmTypeInfo = VmTypes.asVmTypeInfo( vmType, this.getMachine( ) );
-      try {
-        if ( this.isLinux( ) ) {
-          if ( this.hasKernel( ) ) {
-            String manifestLocation = DownloadManifestFactory.generateDownloadManifest(
-                new ImageManifestFile( this.getKernel( ).getManifestLocation( ), BundleImageManifest.INSTANCE ),
-                partition.getNodeCertificate().getPublicKey(), this.getKernel( ).getDisplayName( ));
-            vmTypeInfo.setKernel( this.getKernel( ).getDisplayName( ), manifestLocation );
-          }
-          if ( this.hasRamdisk( ) ) {
-            String manifestLocation = DownloadManifestFactory.generateDownloadManifest(
-                new ImageManifestFile( this.getRamdisk( ).getManifestLocation( ), BundleImageManifest.INSTANCE ),
-                partition.getNodeCertificate().getPublicKey(), this.getRamdisk( ).getDisplayName( ));
-	          vmTypeInfo.setRamdisk( this.getRamdisk( ).getDisplayName( ), manifestLocation );
-          }
+      if ( this.isLinux( ) ) {
+        if ( this.hasKernel( ) ) {
+          vmTypeInfo.setKernel( this.getKernel( ).getDisplayName( ), this.getKernel( ).getManifestLocation( ) );
         }
-	if ( this.getMachine( ) instanceof StaticDiskImage ) { // BootableImage+StaticDiskImage = MachineImageInfo
-	    // generate download manifest and replace machine URL
-	    String manifestLocation = DownloadManifestFactory.generateDownloadManifest(
-            new ImageManifestFile( ((StaticDiskImage) this.getMachine()).getRunManifestLocation(), BundleImageManifest.INSTANCE ),
-            partition.getNodeCertificate().getPublicKey(), instanceId);
-	        vmTypeInfo.setRoot( this.getMachine( ).getDisplayName( ), manifestLocation, this.getMachine( ).getImageSizeBytes() );
-	      }
-      } catch (DownloadManifestException ex) {
-	  throw new MetadataException(ex);
+        if ( this.hasRamdisk( ) ) {
+          vmTypeInfo.setRamdisk( this.getRamdisk( ).getDisplayName( ), this.getRamdisk( ).getManifestLocation( ) );
+        }
       }
-
       return vmTypeInfo;
     }
     
@@ -615,7 +585,7 @@ public class Emis {
                                                          : "UNKNOWN" ) );
     if ( kernelId == null ) {
       throw new NoSuchMetadataException( "Unable to determine required kernel image for " + disk.getDisplayName( ) );
-    } else if ( !CloudMetadatas.isKernelImageIdentifier( kernelId ) ) {
+    } else if ( !kernelId.startsWith( ImageMetadata.Type.kernel.getTypePrefix( ) ) ) {
       throw new InvalidMetadataException( "Image specified is not a kernel: " + kernelId );
     }
     return kernelId;
@@ -636,7 +606,7 @@ public class Emis {
     //GRZE: perfectly legitimate for there to be no ramdisk, carry on. **/
     if ( ramdiskId == null ) {
       return ramdiskId;
-    } else if ( !CloudMetadatas.isRamdiskImageIdentifier( ramdiskId ) ) {
+    } else if ( !ramdiskId.startsWith( ImageMetadata.Type.ramdisk.getTypePrefix( ) ) ) {
       throw new InvalidMetadataException( "Image specified is not a ramdisk: " + ramdiskId );
     } else {
       return ramdiskId;

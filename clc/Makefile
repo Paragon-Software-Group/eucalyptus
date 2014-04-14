@@ -102,7 +102,11 @@ VERSION_PATCH=$(shell echo $(VERSION) | cut -d. -f3)
 # Note: This can be overridden by the user if they
 # specify a different branch when running make.
 #
-CLOUD_LIBS_BRANCH=testing
+ifeq ($(VERSION_MAJOR), 3)
+    ifeq ($(VERSION_MINOR), 4)
+        CLOUD_LIBS_BRANCH=master
+    endif
+endif
 
 ifeq ($(DISABLEGIT), 0)
     $(info Using cloud-libs branch $(CLOUD_LIBS_BRANCH))

@@ -43,11 +43,10 @@ import com.eucalyptus.upgrade.Upgrades.PostUpgrade;
 import com.eucalyptus.upgrade.Upgrades.PreUpgrade;
 import com.eucalyptus.util.Classes;
 import com.google.common.base.Predicate;
-import com.google.common.collect.Lists;
 
 
 File libDir = new File( "${System.getProperty("euca.src.dir")}/clc/target" );
-List<Class> classList = Lists.newArrayList()
+classList = []
 System.err.print "Reading ${libDir.getAbsolutePath()}"
 libDir.listFiles( ).each { File f ->
   System.err.print "."
@@ -89,7 +88,7 @@ def testClass = { Class c, Class cast ->
 }
 classList.each { Class c ->
   try {
-    Ats ats = Ats.from( c );
+    ats = Ats.from( c );
     if ( ats.has( PreUpgrade.class ) ) {
       PreUpgrade pre = ats.get( PreUpgrade.class )
       upgradePre.add( "@PreUpgrade    ${pre.since()}\t${pre.value( ).name}\t${c} ${testClass(c,Callable.class)}" )

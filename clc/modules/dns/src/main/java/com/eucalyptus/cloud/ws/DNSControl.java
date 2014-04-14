@@ -1,5 +1,5 @@
 /*************************************************************************
- * Copyright 2009-2014 Eucalyptus Systems, Inc.
+ * Copyright 2009-2012 Eucalyptus Systems, Inc.
  *
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -62,33 +62,26 @@
 
 package com.eucalyptus.cloud.ws;
 
-import java.net.InetAddress;
 import java.net.SocketException;
 import java.net.UnknownHostException;
 import java.util.Collection;
 import java.util.List;
 import java.util.NoSuchElementException;
-
 import javax.persistence.EntityTransaction;
-
 import org.apache.log4j.Logger;
 import org.xbill.DNS.ARecord;
 import org.xbill.DNS.Address;
 import org.xbill.DNS.CNAMERecord;
 import org.xbill.DNS.DClass;
 import org.xbill.DNS.Name;
-
-import com.eucalyptus.configurable.*;
 import com.eucalyptus.context.Contexts;
 import com.eucalyptus.entities.Entities;
-import com.eucalyptus.entities.TransactionException;
-import com.eucalyptus.entities.TransactionResource;
-import com.eucalyptus.objectstorage.exceptions.s3.AccessDeniedException;
+import com.eucalyptus.entities.EntityWrapper;
+import com.eucalyptus.objectstorage.exceptions.AccessDeniedException;
 import com.eucalyptus.util.DNSProperties;
 import com.eucalyptus.util.EucalyptusCloudException;
 import com.eucalyptus.util.Internets;
 import com.google.common.collect.Lists;
-
 import edu.ucsb.eucalyptus.cloud.entities.ARecordAddressInfo;
 import edu.ucsb.eucalyptus.cloud.entities.ARecordInfo;
 import edu.ucsb.eucalyptus.cloud.entities.ARecordNameInfo;
@@ -117,54 +110,16 @@ import edu.ucsb.eucalyptus.msgs.UpdateARecordType;
 import edu.ucsb.eucalyptus.msgs.UpdateCNAMERecordResponseType;
 import edu.ucsb.eucalyptus.msgs.UpdateCNAMERecordType;
 
-@ConfigurableClass( root = "dns", description = "Controls dns listeners." )
 public class DNSControl {
+
 	private static Logger LOG = Logger.getLogger( DNSControl.class );
 
 	static UDPListener udpListener;
 	static TCPListener tcpListener;
-
-	static final String EMPTY = "";
-
-	@ConfigurableField( displayName = "dns_listener_address",
-			description = "Parameter controlling which address is used for dns listeners",
-			initial = EMPTY,
-			readonly = false,
-			type = ConfigurableFieldType.KEYVALUE,
-			changeListener = DnsAddressChangeListener.class)
-	public static String dns_listener_address = EMPTY;
-	
-
-	public static class DnsAddressChangeListener implements PropertyChangeListener {
-		@Override
-		public void fireChange( ConfigurableProperty t, Object newValue ) throws ConfigurablePropertyException {
-			try {
-				if ( newValue instanceof String  ) {
-					if(t.getValue()!=null && ! t.getValue().equals(newValue)){
-						onPropertyChange((String)newValue);
-						dns_listener_address = newValue.toString();
-						restart();
-					}
-				}
-			} catch ( final Exception e ) {
-				throw new ConfigurablePropertyException(e.getMessage());
-			}
-		}
-	}
-
-	private static void onPropertyChange(final String keyname) throws EucalyptusCloudException {
-		if (!EMPTY.equals(keyname))
-			if(!Internets.testReachability(keyname))
-				throw new EucalyptusCloudException(" address " + keyname + " is not reachable");
-	}
-
 	private static void initializeUDP() throws Exception {
 		try {
 			if (udpListener == null) {
-			  if(EMPTY.equals(dns_listener_address))
-			    udpListener = new UDPListener( InetAddress.getByName( Internets.localHostAddress() ), DNSProperties.PORT);
-			  else
-			    udpListener = new UDPListener( InetAddress.getByName( dns_listener_address ), DNSProperties.PORT);
+				udpListener = new UDPListener(Internets.localHostInetAddress( ), DNSProperties.PORT);
 				udpListener.start();
 			}
 		} catch(SocketException ex) {
@@ -176,10 +131,7 @@ public class DNSControl {
 	private static void initializeTCP() throws Exception {
 		try {
 			if (tcpListener == null) {
-			  if(EMPTY.equals(dns_listener_address))
-			    tcpListener = new TCPListener( InetAddress.getByName( Internets.localHostAddress() ), DNSProperties.PORT);
-			  else
-			    tcpListener = new TCPListener( InetAddress.getByName( dns_listener_address ), DNSProperties.PORT);
+				tcpListener = new TCPListener(Internets.localHostInetAddress( ), DNSProperties.PORT);
 				tcpListener.start();
 			}
 		} catch(UnknownHostException ex) {
@@ -190,32 +142,38 @@ public class DNSControl {
 
 	public static void populateRecords() {
 		DNSProperties.update();
-		try ( final TransactionResource db = Entities.transactionFor( ZoneInfo.class ) ) {
-			List<ZoneInfo> zoneInfos = Entities.query( new ZoneInfo() );
+		EntityWrapper<ZoneInfo> db = EntityWrapper.get(ZoneInfo.class);
+		try {
+			ZoneInfo zInfo = new ZoneInfo();
+			List<ZoneInfo> zoneInfos = db.query(zInfo);
 			for(ZoneInfo zoneInfo : zoneInfos) {
 				String name = zoneInfo.getName();
+				EntityWrapper<SOARecordInfo> dbSOA = db.recast(SOARecordInfo.class);
 				SOARecordInfo searchSOARecordInfo = new SOARecordInfo();
 				searchSOARecordInfo.setName(name);
-				SOARecordInfo soaRecordInfo = Entities.uniqueResult( searchSOARecordInfo );
+				SOARecordInfo soaRecordInfo = dbSOA.getUnique(searchSOARecordInfo);
 
+				EntityWrapper<NSRecordInfo> dbNS = db.recast(NSRecordInfo.class);
 				NSRecordInfo searchNSRecordInfo = new NSRecordInfo();
 				searchNSRecordInfo.setName(name);
-				NSRecordInfo nsRecordInfo = Entities.uniqueResult(searchNSRecordInfo);
+				NSRecordInfo nsRecordInfo = dbNS.getUnique(searchNSRecordInfo);
 
 				ZoneManager.addZone(zoneInfo, soaRecordInfo, nsRecordInfo);
 			}
 
+			EntityWrapper<ARecordInfo> dbARec = db.recast(ARecordInfo.class);
 			ARecordInfo searchARecInfo = new ARecordInfo();
-			List<ARecordInfo> aRecInfos = Entities.query(searchARecInfo);
+			List<ARecordInfo> aRecInfos = dbARec.query(searchARecInfo);
 			for(ARecordInfo aRecInfo : aRecInfos) {
 				ZoneManager.addRecord(aRecInfo, false);
 			}
 			db.commit();
-		} catch(NoSuchElementException | TransactionException ex) {
+		} catch(EucalyptusCloudException ex) {		
+			db.rollback();
 			LOG.error(ex);
-    }
-
-    final EntityTransaction db2 = Entities.get( ARecordNameInfo.class );
+		}
+		
+		final EntityTransaction db2 = Entities.get( ARecordNameInfo.class );
 		try{
 			int count = 0;
 			List<ARecordNameInfo> multiARec = Entities.query(new ARecordNameInfo(), true);
@@ -259,12 +217,6 @@ public class DNSControl {
 			tcpListener.close();
 			tcpListener = null;
 		}
-	}
-
-	public static void restart()  throws Exception {
-		stop();
-		LOG.info("restarting dns listeners with address " + dns_listener_address);
-		initialize();
 	}
 	
 	public DNSControl() {}
@@ -468,46 +420,45 @@ public class DNSControl {
 		
 		String address = request.getAddress();
 		long ttl = request.getTtl();
-		try ( final TransactionResource db = Entities.transactionFor( ARecordInfo.class ) ) {
-			ARecordInfo aRecordInfo = new ARecordInfo();
-			aRecordInfo.setName(name);
+		EntityWrapper<ARecordInfo> db = EntityWrapper.get(ARecordInfo.class);
+		ARecordInfo aRecordInfo = new ARecordInfo();
+		aRecordInfo.setName(name);
+		aRecordInfo.setAddress(address);
+		aRecordInfo.setZone(zone);
+		List<ARecordInfo> arecords = db.query(aRecordInfo);
+		if(arecords.size() > 0) {
+			aRecordInfo = arecords.get(0);
+			if(!zone.equals(aRecordInfo.getZone())) {
+				db.rollback();
+				throw new EucalyptusCloudException("Sorry, record already associated with a zone. Remove the record and try again.");
+			}
 			aRecordInfo.setAddress(address);
-			aRecordInfo.setZone(zone);
-			List<ARecordInfo> arecords = Entities.query(aRecordInfo);
-			if(arecords.size() > 0) {
-				aRecordInfo = arecords.get(0);
-				if(!zone.equals(aRecordInfo.getZone())) {
-					db.rollback();
-					throw new EucalyptusCloudException("Sorry, record already associated with a zone. Remove the record and try again.");
-				}
+			aRecordInfo.setTtl(ttl);
+			//update record
+			try {
+				ARecord arecord = new ARecord(Name.fromString(name), DClass.IN, ttl, Address.getByAddress(address));
+				ZoneManager.updateARecord(zone, arecord);
+			} catch(Exception ex) {
+				LOG.error(ex);
+			}
+		}  else {
+			try {
+				ARecordInfo searchARecInfo = new ARecordInfo();
+				searchARecInfo.setZone(zone);
+				ARecord record = new ARecord(new Name(name), DClass.IN, ttl, Address.getByAddress(address));
+				ZoneManager.addRecord(zone, record, false);
+				aRecordInfo = new ARecordInfo();
+				aRecordInfo.setName(name);
 				aRecordInfo.setAddress(address);
 				aRecordInfo.setTtl(ttl);
-				//update record
-				try {
-					ARecord arecord = new ARecord(Name.fromString(name), DClass.IN, ttl, Address.getByAddress(address));
-					ZoneManager.updateARecord(zone, arecord);
-				} catch(Exception ex) {
-					LOG.error(ex);
-				}
-			}  else {
-				try {
-					ARecordInfo searchARecInfo = new ARecordInfo();
-					searchARecInfo.setZone(zone);
-					ARecord record = new ARecord(new Name(name), DClass.IN, ttl, Address.getByAddress(address));
-					ZoneManager.addRecord(zone, record, false);
-					aRecordInfo = new ARecordInfo();
-					aRecordInfo.setName(name);
-					aRecordInfo.setAddress(address);
-					aRecordInfo.setTtl(ttl);
-					aRecordInfo.setZone(zone);
-					aRecordInfo.setRecordclass(DClass.IN);
-					Entities.persist(aRecordInfo);
-				} catch(Exception ex) {
-					LOG.error(ex);
-				}
+				aRecordInfo.setZone(zone);
+				aRecordInfo.setRecordclass(DClass.IN);
+				db.add(aRecordInfo);
+			} catch(Exception ex) {
+				LOG.error(ex);
 			}
-			db.commit();
 		}
+		db.commit();
 		return reply;
 	}
 
@@ -524,20 +475,21 @@ public class DNSControl {
 		else
 			name+= "."+DNSProperties.DOMAIN + ".";
 		String address = request.getAddress();
+		EntityWrapper<ARecordInfo> db = EntityWrapper.get(ARecordInfo.class);
 		ARecordInfo aRecordInfo = new ARecordInfo();
 		aRecordInfo.setName(name);
 		aRecordInfo.setZone(zone);
 		aRecordInfo.setAddress(address);
-		try ( final TransactionResource db = Entities.transactionFor( ARecordInfo.class ) ) {
-			ARecordInfo foundARecordInfo = Entities.uniqueResult(aRecordInfo);
+		try {
+			ARecordInfo foundARecordInfo = db.getUnique(aRecordInfo);
 			ARecord arecord = new ARecord(Name.fromString(name), DClass.IN, foundARecordInfo.getTtl(), Address.getByAddress(foundARecordInfo.getAddress()));
 			ZoneManager.deleteRecord(zone, arecord);
-			Entities.delete(foundARecordInfo);
+			db.delete(foundARecordInfo);
 			db.commit();
-		} catch(NoSuchElementException e) {
-			LOG.error(e);
+
 		} catch(Exception ex) {
-			LOG.error(ex, ex);
+			db.rollback();
+			LOG.error(ex);
 		}
 		return reply;
 	}
@@ -546,9 +498,7 @@ public class DNSControl {
 		AddZoneResponseType reply = (AddZoneResponseType) request.getReply();
 		String name = request.getName();
 		if(!Contexts.lookup().hasAdministrativePrivileges()) {
-			throw new EucalyptusCloudException("Access Denied. Only administrator can add zone.");
-			//zhill - removed this, should not use OSG/Walrus exceptions in the DNS stack.
-			//throw new AccessDeniedException(name);
+			throw new AccessDeniedException(name);
 		}
 
 		return reply;
@@ -560,47 +510,46 @@ public class DNSControl {
 		String name = request.getName()  + DNSProperties.DOMAIN + ".";
 		String alias = request.getAlias() + DNSProperties.DOMAIN + ".";
 		long ttl = request.getTtl();
+		EntityWrapper<CNAMERecordInfo> db = EntityWrapper.get(CNAMERecordInfo.class);
 		CNAMERecordInfo cnameRecordInfo = new CNAMERecordInfo();
 		cnameRecordInfo.setName(name);
 		cnameRecordInfo.setAlias(alias);
 		cnameRecordInfo.setZone(zone);
-		try ( final TransactionResource db = Entities.transactionFor( CNAMERecordInfo.class ) ) {
-			List<CNAMERecordInfo> cnamerecords = Entities.query(cnameRecordInfo);
-			if(cnamerecords.size() > 0) {
-				cnameRecordInfo = cnamerecords.get(0);
-				if(!zone.equals(cnameRecordInfo.getZone())) {
-					db.rollback();
-					throw new EucalyptusCloudException("Sorry, record already associated with a zone. Remove the record and try again.");
-				}
+		List<CNAMERecordInfo> cnamerecords = db.query(cnameRecordInfo);
+		if(cnamerecords.size() > 0) {
+			cnameRecordInfo = cnamerecords.get(0);
+			if(!zone.equals(cnameRecordInfo.getZone())) {
+				db.rollback();
+				throw new EucalyptusCloudException("Sorry, record already associated with a zone. Remove the record and try again.");
+			}
+			cnameRecordInfo.setAlias(alias);
+			cnameRecordInfo.setTtl(ttl);
+			//update record
+			try {
+				CNAMERecord cnameRecord = new CNAMERecord(Name.fromString(name), DClass.IN, ttl, Name.fromString(alias));
+				ZoneManager.updateCNAMERecord(zone, cnameRecord);
+			} catch(Exception ex) {
+				LOG.error(ex);
+			}
+		}  else {
+			try {
+				CNAMERecordInfo searchCNAMERecInfo = new CNAMERecordInfo();
+				searchCNAMERecInfo.setZone(zone);
+				CNAMERecord record = new CNAMERecord(new Name(name), DClass.IN, ttl, Name.fromString(alias));
+				ZoneManager.addRecord(zone, record, false);
+				cnameRecordInfo = new CNAMERecordInfo();
+				cnameRecordInfo.setName(name);
 				cnameRecordInfo.setAlias(alias);
 				cnameRecordInfo.setTtl(ttl);
-				//update record
-				try {
-					CNAMERecord cnameRecord = new CNAMERecord(Name.fromString(name), DClass.IN, ttl, Name.fromString(alias));
-					ZoneManager.updateCNAMERecord(zone, cnameRecord);
-				} catch(Exception ex) {
-					LOG.error(ex);
-				}
-			}  else {
-				try {
-					CNAMERecordInfo searchCNAMERecInfo = new CNAMERecordInfo();
-					searchCNAMERecInfo.setZone(zone);
-					CNAMERecord record = new CNAMERecord(new Name(name), DClass.IN, ttl, Name.fromString(alias));
-					ZoneManager.addRecord(zone, record, false);
-					cnameRecordInfo = new CNAMERecordInfo();
-					cnameRecordInfo.setName(name);
-					cnameRecordInfo.setAlias(alias);
-					cnameRecordInfo.setTtl(ttl);
-					cnameRecordInfo.setZone(zone);
-					cnameRecordInfo.setRecordclass(DClass.IN);
-					Entities.persist(cnameRecordInfo);
-				} catch(Exception ex) {
-					LOG.error(ex);
-				}
+				cnameRecordInfo.setZone(zone);
+				cnameRecordInfo.setRecordclass(DClass.IN);
+				db.add(cnameRecordInfo);
+			} catch(Exception ex) {
+				LOG.error(ex);
 			}
-			db.commit();
-
 		}
+		db.commit();
+
 		return reply;
 	}
 
@@ -609,17 +558,19 @@ public class DNSControl {
 		String zone = request.getZone()  + DNSProperties.DOMAIN + ".";
 		String name = request.getName()  + DNSProperties.DOMAIN + ".";
 		String alias = request.getAlias() + DNSProperties.DOMAIN + ".";
+		EntityWrapper<CNAMERecordInfo> db = EntityWrapper.get(CNAMERecordInfo.class);
 		CNAMERecordInfo cnameRecordInfo = new CNAMERecordInfo();
 		cnameRecordInfo.setName(name);
 		cnameRecordInfo.setZone(zone);
 		cnameRecordInfo.setAlias(alias);
-		try ( final TransactionResource db = Entities.transactionFor( CNAMERecordInfo.class ) ) {
-			CNAMERecordInfo foundCNAMERecordInfo = Entities.uniqueResult(cnameRecordInfo);
+		try {
+			CNAMERecordInfo foundCNAMERecordInfo = db.getUnique(cnameRecordInfo);
 			CNAMERecord cnameRecord = new CNAMERecord(Name.fromString(name), DClass.IN, foundCNAMERecordInfo.getTtl(), Name.fromString(foundCNAMERecordInfo.getAlias()));
 			ZoneManager.deleteRecord(zone, cnameRecord);
-			Entities.delete(foundCNAMERecordInfo);
+			db.delete(foundCNAMERecordInfo);
 			db.commit();
 		} catch(Exception ex) {
+			db.rollback();
 			LOG.error(ex);
 		}
 		return reply;
@@ -631,12 +582,14 @@ public class DNSControl {
 		if(!Contexts.lookup().hasAdministrativePrivileges()) {
 			throw new AccessDeniedException(name);
 		}
+		EntityWrapper<ZoneInfo> db = EntityWrapper.get(ZoneInfo.class);
 		ZoneInfo zoneInfo = new ZoneInfo(name);
-		try ( final TransactionResource db = Entities.transactionFor( ZoneInfo.class ) ) {
-			ZoneInfo foundZoneInfo = Entities.uniqueResult(zoneInfo);
-			Entities.delete(foundZoneInfo);
+		try {
+			ZoneInfo foundZoneInfo = db.getUnique(zoneInfo);
+			db.delete(foundZoneInfo);
 			db.commit();
 		} catch(Exception ex) {
+			db.rollback();
 			LOG.error(ex);
 		}
 		ZoneManager.deleteZone(name);

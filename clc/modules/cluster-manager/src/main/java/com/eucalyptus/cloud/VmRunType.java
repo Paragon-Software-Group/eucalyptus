@@ -1,5 +1,5 @@
 /*************************************************************************
- * Copyright 2009-2014 Eucalyptus Systems, Inc.
+ * Copyright 2009-2012 Eucalyptus Systems, Inc.
  *
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -104,12 +104,7 @@ public class VmRunType extends CloudClusterMessage {
       this.buildit.setNetworkIndex( networkIndex );
       return this;
     }
-
-    public VmRunType.Builder privateAddress( String privateAddress ) {
-      this.buildit.setPrivateAddress( privateAddress );
-      return this;
-    }
-
+    
     public VmRunType.Builder launchIndex( final Integer launchIndex ) {
       this.buildit.setLaunchIndex( launchIndex );
       return this;
@@ -130,11 +125,6 @@ public class VmRunType extends CloudClusterMessage {
       return this;
     }
     
-    public VmRunType.Builder credential( final String credential ){
-      this.buildit.setCredential( credential );
-      return this;
-    }
-    
     public VmRunType.Builder networkNames( List<NetworkGroup> list ) {
       for ( NetworkGroup g : list ) {
         this.buildit.getNetworkNames( ).add( g.getClusterNetworkName( ) );
@@ -149,6 +139,8 @@ public class VmRunType extends CloudClusterMessage {
     
     public VmRunType.Builder instanceId( final String instanceId ) {
       this.buildit.setInstanceId( instanceId );
+      this.buildit.setMacAddress( String.format( "d0:0d:%s:%s:%s:%s", instanceId.substring( 2, 4 ), instanceId.substring( 4, 6 ), instanceId.substring( 6, 8 ),
+                                                 instanceId.substring( 8, 10 ) ) );
       return this;
     }
     
@@ -156,6 +148,7 @@ public class VmRunType extends CloudClusterMessage {
       /** GRZE:NOTE: Nullables: userData, keyInfo **/
       checkParam( this.buildit.getInstanceId(), notNullValue() );
       checkParam( this.buildit.getLaunchIndex(), notNullValue() );
+      checkParam( this.buildit.getMacAddress(), notNullValue() );
       checkParam( this.buildit.getNetworkNames().isEmpty(), is( false ) );
       checkParam( this.buildit.getNetworkIndex(), notNullValue() );
       checkParam( this.buildit.getPlatform(), notNullValue() );
@@ -184,12 +177,10 @@ public class VmRunType extends CloudClusterMessage {
   private String       reservationId;
   @Nullable
   private String       userData;
-  @Nullable
-  private String       credential;
   private String       platform;
   private Integer      maxCount     = 1;
   private Integer      minCount     = 1;
-  private Integer      vlan         = -1;
+  private Integer      vlan;
   private Integer      launchIndex;
   private VmTypeInfo   vmTypeInfo;
   @Nullable
@@ -198,9 +189,9 @@ public class VmRunType extends CloudClusterMessage {
   private String       ownerId;
   private String       accountId;
   private String       uuid;
+  private String       macAddress;
   private List<String> networkNames = new ArrayList<String>( );
-  private Long         networkIndex = -1l;
-  private String       privateAddress;
+  private Long         networkIndex;
   
   VmRunType( ) {}
   
@@ -220,9 +211,9 @@ public class VmRunType extends CloudClusterMessage {
   @Override
   public String toString( ) {
     return String.format(
-                          "VmRunType [instanceIds=%s, keyInfo=%s, launchIndex=%s, amount=%s, networkIndexList=%s, privateAddr=%s, networkNames=%s, reservationId=%s, userData=%s, vlan=%s, vmTypeInfo=%s]",
+                          "VmRunType [instanceIds=%s, keyInfo=%s, launchIndex=%s, amount=%s, networkIndexList=%s, networkNames=%s, reservationId=%s, userData=%s, vlan=%s, vmTypeInfo=%s]",
                           this.instanceId, this.keyInfo, this.launchIndex,
-                          this.minCount, this.networkIndex, this.privateAddress, this.networkNames, this.reservationId,
+                          this.minCount, this.networkIndex, this.networkNames, this.reservationId,
                           this.userData, this.vlan, this.vmTypeInfo );
   }
   
@@ -283,17 +274,6 @@ public class VmRunType extends CloudClusterMessage {
     return this.userData;
   }
   
-  public void setCredential(final String credential){
-    if(credential==null)
-      this.credential = "";
-    else
-      this.credential = credential;
-  } 
-  
-  public String getCredential(){
-    return this.credential;
-  }
-  
   public String getPlatform( ) {
     return this.platform;
   }
@@ -329,9 +309,7 @@ public class VmRunType extends CloudClusterMessage {
   public Long getNetworkIndex( ) {
     return this.networkIndex;
   }
-
-  public String getPrivateAddress() { return privateAddress; }
-
+  
   void setVlan( final Integer vlan ) {
     this.vlan = vlan;
   }
@@ -344,16 +322,22 @@ public class VmRunType extends CloudClusterMessage {
     this.uuid = uuid;
   }
   
+  void setMacAddress( final String macAddress ) {
+    this.macAddress = macAddress;
+  }
+  
   public String getUuid( ) {
     return this.uuid;
+  }
+  
+  public String getMacAddress( ) {
+    return this.macAddress;
   }
   
   void setNetworkIndex( final Long networkIndex ) {
     this.networkIndex = networkIndex;
   }
-
-  void setPrivateAddress( final String privateAddress ) { this.privateAddress = privateAddress; }
-
+  
   public String getOwnerId( ) {
     return this.ownerId;
   }

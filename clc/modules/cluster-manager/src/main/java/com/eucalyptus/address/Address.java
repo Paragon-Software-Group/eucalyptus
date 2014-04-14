@@ -78,7 +78,7 @@ import org.hibernate.annotations.CacheConcurrencyStrategy;
 import com.eucalyptus.auth.Accounts;
 import com.eucalyptus.auth.principal.Principals;
 import com.eucalyptus.auth.principal.UserFullName;
-import com.eucalyptus.compute.common.CloudMetadata.AddressMetadata;
+import com.eucalyptus.cloud.CloudMetadata.AddressMetadata;
 import com.eucalyptus.cluster.callback.AssignAddressCallback;
 import com.eucalyptus.cluster.callback.UnassignAddressCallback;
 import com.eucalyptus.component.ComponentIds;
@@ -86,6 +86,7 @@ import com.eucalyptus.component.id.ClusterController;
 import com.eucalyptus.entities.AccountMetadata;
 import com.eucalyptus.entities.UserMetadata;
 import com.eucalyptus.entities.Entities;
+import com.eucalyptus.entities.UserMetadata;
 import com.eucalyptus.event.ListenerRegistry;
 import com.eucalyptus.records.EventRecord;
 import com.eucalyptus.records.EventType;
@@ -193,8 +194,12 @@ public class Address extends UserMetadata<Address.State> implements AddressMetad
   
   public Address( ) {}
   
-  public Address( String ipAddress ) {
+  public Address( final String ipAddress ) {
     super( Principals.nobodyFullName( ), ipAddress );
+  }
+  
+  public Address( String ipAddress, String partition ) {
+    this( ipAddress );
     this.instanceUuid = UNASSIGNED_INSTANCEUUID;
     this.instanceId = UNASSIGNED_INSTANCEID;
     this.instanceAddress = UNASSIGNED_INSTANCEADDR;

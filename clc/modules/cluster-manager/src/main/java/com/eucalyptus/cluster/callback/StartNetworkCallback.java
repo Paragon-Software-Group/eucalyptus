@@ -63,8 +63,6 @@
 package com.eucalyptus.cluster.callback;
 
 import javax.persistence.EntityTransaction;
-
-import com.eucalyptus.vm.VmInstances;
 import org.apache.log4j.Logger;
 import com.eucalyptus.cluster.Clusters;
 import com.eucalyptus.entities.Entities;
@@ -112,7 +110,6 @@ public class StartNetworkCallback extends BroadcastCallback<StartNetworkType, St
   @Override
   public void initialize( StartNetworkType msg ) {
     try {
-      msg.setVmsubdomain( VmInstances.INSTANCE_SUBDOMAIN.substring( 1 ) );
       msg.setNameserver( edu.ucsb.eucalyptus.cloud.entities.SystemConfiguration.getSystemConfiguration( ).getNameserverAddress( ) );
       msg.setClusterControllers( Lists.newArrayList( Clusters.getInstance( ).getClusterAddresses( ) ) );
     } catch ( Exception e ) {

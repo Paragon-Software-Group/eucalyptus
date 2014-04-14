@@ -62,7 +62,6 @@
 package com.eucalyptus.component.fault;
 
 import java.util.ArrayList;
-import java.util.concurrent.atomic.AtomicBoolean;
 
 import org.apache.log4j.Logger;
 
@@ -129,17 +128,4 @@ public class FaultBuilderImpl implements FaultBuilder {
 		}
 	}
 
-	@Override
-	public Runnable logOnFirstRun( ) {
-		return new Runnable( ) {
-			private final AtomicBoolean logged = new AtomicBoolean( false );
-
-			@Override
-			public void run( ) {
-				if ( logged.compareAndSet( false, true ) ) {
-					log( );
-				}
-			}
-		};
-	}
 }

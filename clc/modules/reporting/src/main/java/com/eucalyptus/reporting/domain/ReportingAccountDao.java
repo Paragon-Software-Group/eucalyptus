@@ -1,5 +1,5 @@
 /*************************************************************************
- * Copyright 2009-2013 Eucalyptus Systems, Inc.
+ * Copyright 2009-2012 Eucalyptus Systems, Inc.
  *
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -19,36 +19,77 @@
  ************************************************************************/
 package com.eucalyptus.reporting.domain;
 
-import java.util.NoSuchElementException;
-import javax.annotation.Nullable;
+import java.util.*;
+import java.util.concurrent.ConcurrentHashMap;
+
 import org.apache.log4j.Logger;
-import com.eucalyptus.entities.Entities;
-import com.eucalyptus.entities.TransactionResource;
+
+import com.eucalyptus.entities.EntityWrapper;
 
 /**
- * ReportingAccountDao is an object for reading ReportingAccount objects from
- * the database.
+ * <p>ReportingAccountDao is an object for reading ReportingAccount objects from the
+ * database.
  */
-public class ReportingAccountDao {
-  private static Logger LOG = Logger.getLogger( ReportingAccountDao.class );
+public class ReportingAccountDao
+{
+	private static Logger LOG = Logger.getLogger( ReportingAccountDao.class );
 
-  private static ReportingAccountDao instance = new ReportingAccountDao( );
+	private static ReportingAccountDao instance = null;
+	
+	public static synchronized ReportingAccountDao getInstance()
+	{
+		if (instance == null) {
+			instance = new ReportingAccountDao();
+			instance.loadFromDb();
+		}
+		return instance;
+	}
+	
+	private final Map<String,ReportingAccount> accounts =
+		new ConcurrentHashMap<String,ReportingAccount>();
 
-  public static ReportingAccountDao getInstance( ) {
-    return instance;
-  }
+	private ReportingAccountDao()
+	{
+		
+	}
 
-  @Nullable
-  public ReportingAccount getReportingAccount( final String accountId ) {
-    final ReportingAccount searchAccount = new ReportingAccount( );
-    searchAccount.setId( accountId );
-    try ( final TransactionResource db = Entities.transactionFor( ReportingAccount.class ) ) {
-      return Entities.uniqueResult( searchAccount );
-    } catch ( NoSuchElementException e ) {
-      // OK
-    } catch ( Exception ex ) {
-      LOG.error( ex, ex );
-    }
-    return null;
-  }
+	public ReportingAccount getReportingAccount(String accountId)
+	{
+		return accounts.get(accountId);
+	}
+	
+	private void loadFromDb()
+	{
+		LOG.debug("Load accounts from db");
+		
+		EntityWrapper<ReportingAccount> entityWrapper =
+			EntityWrapper.get(ReportingAccount.class);
+
+		try {
+			@SuppressWarnings("rawtypes")
+			List reportingAccounts = (List)
+				entityWrapper.createQuery("from ReportingAccount")
+				.list();
+
+			for (Object obj: reportingAccounts) {
+				ReportingAccount account = (ReportingAccount) obj;
+				accounts.put(account.getId(), account);
+				LOG.debug("load account from db, id:" + account.getId() + " name:" + account.getName());
+			}
+				
+			entityWrapper.commit();
+		} catch (Exception ex) {
+			LOG.error(ex);
+			entityWrapper.rollback();
+			throw new RuntimeException(ex);
+		}			
+	}
+	
+	void putCache(ReportingAccount account)
+	{
+		accounts.put(account.getId(), account);
+	}
+	
+
 }
+

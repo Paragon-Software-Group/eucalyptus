@@ -1,5 +1,5 @@
 /*************************************************************************
- * Copyright 2009-2014 Eucalyptus Systems, Inc.
+ * Copyright 2009-2013 Eucalyptus Systems, Inc.
  *
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -20,7 +20,6 @@
 package com.eucalyptus.auth.principal;
 
 import java.security.cert.X509Certificate;
-import java.util.Date;
 import java.util.List;
 import java.util.Map;
 import com.eucalyptus.auth.AuthException;
@@ -43,11 +42,6 @@ public final class RoleUser implements User {
   }
 
   @Override
-  public String getAccountNumber() throws AuthException {
-    return role.getAccountNumber();
-  }
-
-  @Override
   public Account getAccount() throws AuthException {
     return role.getAccount();
   }
@@ -59,11 +53,6 @@ public final class RoleUser implements User {
 
   @Override
   public Policy addPolicy( final String name, final String policy ) throws AuthException, PolicyParseException {
-    throw new AuthException( "Not supported" );
-  }
-
-  @Override
-  public Policy putPolicy( final String name, final String policy ) throws AuthException, PolicyParseException {
     throw new AuthException( "Not supported" );
   }
 
@@ -92,10 +81,6 @@ public final class RoleUser implements User {
     return user.getUserId();
   }
 
-  public String getRoleId() {
-    return role.getRoleId();
-  }
-
   @Override
   public void setName( final String name ) throws AuthException {
     throw new AuthException( "Not supported" );
@@ -112,13 +97,8 @@ public final class RoleUser implements User {
   }
 
   @Override
-  public Date getCreateDate() {
-    return user.getCreateDate( );
-  }
-
-  @Override
   public RegistrationStatus getRegistrationStatus() {
-    return RegistrationStatus.CONFIRMED;
+    return user.getRegistrationStatus();
   }
 
   @Override
@@ -172,6 +152,11 @@ public final class RoleUser implements User {
 
   @Override
   public void setPassword( final String password ) throws AuthException {
+    throw new AuthException( "Not supported" );
+  }
+
+  @Override
+  public void createPassword() throws AuthException {
     throw new AuthException( "Not supported" );
   }
 
@@ -258,11 +243,6 @@ public final class RoleUser implements User {
   @Override
   public boolean isSystemAdmin() {
     return false;
-  }
-
-  @Override
-  public boolean isSystemUser() {
-    return user.isSystemAdmin( );
   }
 
   @Override

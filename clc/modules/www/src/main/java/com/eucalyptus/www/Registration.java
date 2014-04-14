@@ -1,5 +1,5 @@
 /*************************************************************************
- * Copyright 2009-2014 Eucalyptus Systems, Inc.
+ * Copyright 2009-2012 Eucalyptus Systems, Inc.
  *
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -62,7 +62,6 @@
 
 package com.eucalyptus.www;
 
-import static com.eucalyptus.compute.common.network.NetworkingFeature.ElasticIPs;
 import java.io.IOException;
 import java.util.UUID;
 import javax.crypto.Mac;
@@ -76,15 +75,18 @@ import javax.servlet.http.HttpServletResponse;
 import org.apache.log4j.Logger;
 import com.eucalyptus.auth.util.Hashes;
 import com.eucalyptus.blockstorage.Storage;
+import com.eucalyptus.cluster.Clusters;
+import com.eucalyptus.component.Components;
 import com.eucalyptus.component.ServiceConfiguration;
 import com.eucalyptus.component.ServiceConfigurations;
 import com.eucalyptus.component.ServiceUris;
 import com.eucalyptus.component.Topology;
 import com.eucalyptus.component.id.Eucalyptus;
 import com.eucalyptus.crypto.Hmac;
-import com.eucalyptus.compute.common.network.Networking;
-import com.eucalyptus.objectstorage.ObjectStorage;
+import com.eucalyptus.network.NetworkGroups;
+import com.eucalyptus.objectstorage.Walrus;
 import com.eucalyptus.util.Internets;
+import com.eucalyptus.ws.StackConfiguration;
 import edu.ucsb.eucalyptus.cloud.entities.SystemConfiguration;
 
 public class Registration extends HttpServlet {
@@ -129,7 +131,7 @@ public class Registration extends HttpServlet {
   }
   
   private static String publicAddressConfiguration( ) {
-    if ( Networking.getInstance().supports( ElasticIPs ) ) {
+    if ( NetworkGroups.networkingConfiguration( ).hasNetworking( ) ) {
       return "        <Resource>\n" + "          <Name>elastic_ips</Name>\n" + "        </Resource>\n";
     } else {
       return "";
@@ -137,8 +139,8 @@ public class Registration extends HttpServlet {
   }
   
   private static String getWalrusUrl( ) {
-    if( Topology.isEnabledLocally( ObjectStorage.class ) ) {
-      ServiceConfiguration walrusConfig = Topology.lookup( ObjectStorage.class );
+    if( Topology.isEnabledLocally( Walrus.class ) ) {
+      ServiceConfiguration walrusConfig = Topology.lookup( Walrus.class );
       return ServiceUris.remote( walrusConfig ).toASCIIString( );
     } else {
       return "NOT REGISTERED.";

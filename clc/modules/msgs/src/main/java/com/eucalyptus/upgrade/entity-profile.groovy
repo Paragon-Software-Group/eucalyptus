@@ -36,10 +36,9 @@ import javax.persistence.OneToMany
 import javax.persistence.OneToOne
 import javax.persistence.Table
 import javax.persistence.Transient
-import com.google.common.collect.Lists
 
 File libDir = new File( "${System.getProperty("euca.src.dir")}/clc/target" );
-List<Class> classList = Lists.newArrayList()
+classList = []
 libDir.listFiles( ).each { File f ->
   System.err.println "Reading ${f.getAbsolutePath()}"
   try {
@@ -67,7 +66,7 @@ libDir.listFiles( ).each { File f ->
 }
 classList.each { Class c ->
   try {
-   Ats ats = Ats.from( c );
+    ats = Ats.from( c );
     if ( ats.has( javax.persistence.Entity.class ) 
       || ats.has( javax.persistence.Embeddable.class ) 
       || ats.has( MappedSuperclass.class ) ) {
@@ -85,7 +84,7 @@ classList.each { Class c ->
           System.err.println "Missing @Table: ${c.getCanonicalName( )}"
         }
       }
-      Collection<Field> candidateFields = c.declaredFields.findAll{ Field f ->
+      candidateFields = c.declaredFields.findAll{ Field f ->
         !Modifier.isStatic( f.getModifiers( ) ) &&
             !Ats.from( f ).has( Transient.class ) &&
             !"metaClass".equals( f.getName( ) )

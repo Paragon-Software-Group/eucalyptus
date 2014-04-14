@@ -1,5 +1,5 @@
 /*************************************************************************
- * Copyright 2009-2014 Eucalyptus Systems, Inc.
+ * Copyright 2009-2012 Eucalyptus Systems, Inc.
  *
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -62,10 +62,7 @@
 
 package com.eucalyptus.auth;
 
-import java.io.IOException;
-import java.io.ObjectInputStream;
 import java.security.cert.X509Certificate;
-import java.util.Date;
 import java.util.List;
 import java.util.Map;
 import org.apache.log4j.Logger;
@@ -74,7 +71,6 @@ import com.eucalyptus.auth.checker.InvalidValueException;
 import com.eucalyptus.auth.checker.ValueChecker;
 import com.eucalyptus.auth.checker.ValueCheckerFactory;
 import com.eucalyptus.auth.entities.AccessKeyEntity;
-import com.eucalyptus.auth.entities.AccountEntity;
 import com.eucalyptus.auth.entities.AuthorizationEntity;
 import com.eucalyptus.auth.entities.CertificateEntity;
 import com.eucalyptus.auth.entities.ConditionEntity;
@@ -93,13 +89,10 @@ import com.eucalyptus.auth.principal.User;
 import com.eucalyptus.auth.principal.Authorization.EffectType;
 import com.eucalyptus.auth.util.X509CertHelper;
 import com.eucalyptus.crypto.Crypto;
-import com.eucalyptus.entities.Entities;
+import com.eucalyptus.entities.EntityWrapper;
 import java.util.concurrent.ExecutionException;
-import com.eucalyptus.entities.TransactionResource;
 import com.eucalyptus.util.Tx;
 import com.google.common.base.Strings;
-import com.google.common.base.Supplier;
-import com.google.common.base.Suppliers;
 import com.google.common.collect.Lists;
 import com.google.common.collect.Maps;
 
@@ -114,29 +107,11 @@ public class DatabaseUserProxy implements User {
   private static final ValueChecker POLICY_NAME_CHECKER = ValueCheckerFactory.createPolicyNameChecker( );
   
   private UserEntity delegate;
-  private transient Supplier<String> accountNumberSupplier =
-      DatabaseAuthUtils.getAccountNumberSupplier( this );
-  private transient Supplier<Map<String,String>> userInfoSupplier =
-      getUserInfoSupplier();
   
   public DatabaseUserProxy( UserEntity delegate ) {
     this.delegate = delegate;
   }
-
-  public DatabaseUserProxy( UserEntity delegate,
-                            String accountNumber ) {
-    this.delegate = delegate;
-    accountNumberSupplier = Suppliers.ofInstance( accountNumber );
-  }
-
-  public DatabaseUserProxy( UserEntity delegate,
-                            String accountNumber,
-                            Map<String,String> info ) {
-    this.delegate = delegate;
-    accountNumberSupplier = Suppliers.ofInstance( accountNumber );
-    userInfoSupplier = Suppliers.ofInstance( info );
-  }
-
+  
   @Override
   public String toString( ) {
     final StringBuilder sb = new StringBuilder( );
@@ -175,8 +150,9 @@ public class DatabaseUserProxy implements User {
       this.getAccount( ).lookupUserByName( name );
     } catch ( AuthException e ) {
       // not found
-      try ( final TransactionResource db = Entities.transactionFor( UserEntity.class ) ) {
-        UserEntity user = DatabaseAuthUtils.getUnique( UserEntity.class, "userId", this.delegate.getUserId( ) );
+      EntityWrapper<UserEntity> db = EntityWrapper.get( UserEntity.class );
+      try {
+        UserEntity user = DatabaseAuthUtils.getUnique( db, UserEntity.class, "userId", this.delegate.getUserId( ) );
         user.setName( name );
         for ( GroupEntity g : user.getGroups( ) ) {
           if ( g.isUserGroup( ) ) {
@@ -187,6 +163,7 @@ public class DatabaseUserProxy implements User {
         db.commit( );
       } catch ( Exception t ) {
         Debugging.logError( LOG, t, "Failed to setName for " + this.delegate );
+        db.rollback( );
         throw new AuthException( t );
       }
       return;
@@ -218,11 +195,6 @@ public class DatabaseUserProxy implements User {
       Debugging.logError( LOG, e, "Failed to setPath for " + this.delegate );
       throw new AuthException( e );
     }
-  }
-
-  @Override
-  public Date getCreateDate() {
-    return this.delegate.getCreationTimestamp( );
   }
 
   @Override
@@ -333,6 +305,11 @@ public class DatabaseUserProxy implements User {
   }
 
   @Override
+  public void createPassword( ) throws AuthException {
+    this.setPassword( Crypto.generateEncryptedPassword( this.delegate.getName( ) ) );
+  }
+  
+  @Override
   public Long getPasswordExpires( ) {
     return this.delegate.getPasswordExpires( );
   }
@@ -353,12 +330,34 @@ public class DatabaseUserProxy implements User {
 
   @Override
   public String getInfo( final String key ) throws AuthException {
-    return DatabaseAuthUtils.extract( userInfoSupplier ).get( key.toLowerCase( ) );
+    final List<String> results = Lists.newArrayList( );
+    try {
+      DatabaseAuthUtils.invokeUnique( UserEntity.class, "userId", this.delegate.getUserId( ), new Tx<UserEntity>( ) {
+        public void fire( UserEntity t ) {
+          results.add( t.getInfo( ).get( key.toLowerCase( ) ) );
+        }
+      } );
+    } catch ( ExecutionException e ) {
+      Debugging.logError( LOG, e, "Failed to getInfo for " + this.delegate );
+      throw new AuthException( e );
+    }
+    return results.get( 0 );
   }
 
   @Override
   public Map<String, String> getInfo( ) throws AuthException {
-    return DatabaseAuthUtils.extract( userInfoSupplier );
+    final Map<String, String> results = Maps.newHashMap( );
+    try {
+      DatabaseAuthUtils.invokeUnique( UserEntity.class, "userId", this.delegate.getUserId( ), new Tx<UserEntity>( ) {
+        public void fire( UserEntity t ) {
+          results.putAll( t.getInfo( ) );
+        }
+      } );
+    } catch ( ExecutionException e ) {
+      Debugging.logError( LOG, e, "Failed to getInfo for " + this.delegate );
+      throw new AuthException( e );
+    }
+    return results;
   }
 
   @Override
@@ -435,11 +434,13 @@ public class DatabaseUserProxy implements User {
   
   @Override
   public AccessKey getKey( final String keyId ) throws AuthException {
-    try ( final TransactionResource db = Entities.transactionFor( AccessKeyEntity.class ) ) {
-      AccessKeyEntity key = DatabaseAuthUtils.getUnique( AccessKeyEntity.class, "accessKey", keyId );
+    EntityWrapper<AccessKeyEntity> db = EntityWrapper.get( AccessKeyEntity.class );
+    try {
+      AccessKeyEntity key = DatabaseAuthUtils.getUnique( db, AccessKeyEntity.class, "accessKey", keyId );
       db.commit( );
       return new DatabaseAccessKeyProxy( key );
     } catch ( Exception e ) {
+      db.rollback( );
       Debugging.logError( LOG, e, "Failed to get access key " + keyId );
       throw new AuthException( AuthException.NO_SUCH_KEY );
     }
@@ -450,13 +451,15 @@ public class DatabaseUserProxy implements User {
     if ( Strings.isNullOrEmpty( keyId ) ) {
       throw new AuthException( AuthException.EMPTY_KEY_ID );
     }
-    try ( final TransactionResource db = Entities.transactionFor( UserEntity.class ) ) {
-      UserEntity user = DatabaseAuthUtils.getUnique( UserEntity.class, "userId", this.delegate.getUserId( ) );
-      AccessKeyEntity keyEntity = DatabaseAuthUtils.getUnique( AccessKeyEntity.class, "accessKey", keyId );
+    EntityWrapper<UserEntity> db = EntityWrapper.get( UserEntity.class );
+    try {
+      UserEntity user = DatabaseAuthUtils.getUnique( db, UserEntity.class, "userId", this.delegate.getUserId( ) );
+      AccessKeyEntity keyEntity = DatabaseAuthUtils.getUnique( db.recast( AccessKeyEntity.class ), AccessKeyEntity.class, "accessKey", keyId );
       user.getKeys( ).remove( keyEntity );
-      Entities.delete( keyEntity );
+      db.recast( AccessKeyEntity.class ).delete( keyEntity );
       db.commit( );
     } catch ( Exception e ) {
+      db.rollback( );
       Debugging.logError( LOG, e, "Failed to get delete key " + keyId );
       throw new AuthException( e );
     }
@@ -464,15 +467,17 @@ public class DatabaseUserProxy implements User {
 
   @Override
   public AccessKey createKey( ) throws AuthException {
-    try ( final TransactionResource db = Entities.transactionFor( UserEntity.class ) ) {
-      UserEntity user = DatabaseAuthUtils.getUnique( UserEntity.class, "userId", this.delegate.getUserId( ) );
+    EntityWrapper<UserEntity> db = EntityWrapper.get( UserEntity.class );
+    try {
+      UserEntity user = DatabaseAuthUtils.getUnique( db, UserEntity.class, "userId", this.delegate.getUserId( ) );
       AccessKeyEntity keyEntity = new AccessKeyEntity( user );
       keyEntity.setActive( true );
-      Entities.persist( keyEntity );
+      db.recast( AccessKeyEntity.class ).add( keyEntity );
       user.getKeys( ).add( keyEntity );
       db.commit( );
       return new DatabaseAccessKeyProxy( keyEntity );
     } catch ( Exception e ) {
+      db.rollback( );
       Debugging.logError( LOG, e, "Failed to get create new access key: " + e.getMessage( ) );
       throw new AuthException( e );
     }
@@ -499,11 +504,13 @@ public class DatabaseUserProxy implements User {
 
   @Override
   public Certificate getCertificate( final String certificateId ) throws AuthException {
-    try ( final TransactionResource db = Entities.transactionFor( CertificateEntity.class ) ) {
-      CertificateEntity cert = DatabaseAuthUtils.getUnique( CertificateEntity.class, "certificateId", certificateId );
+    EntityWrapper<CertificateEntity> db = EntityWrapper.get( CertificateEntity.class );
+    try {
+      CertificateEntity cert = DatabaseAuthUtils.getUnique( db, CertificateEntity.class, "certificateId", certificateId );
       db.commit( );
       return new DatabaseCertificateProxy( cert );
     } catch ( Exception e ) {
+      db.rollback( );
       Debugging.logError( LOG, e, "Failed to get signing certificate " + certificateId );
       throw new AuthException( AuthException.NO_SUCH_CERTIFICATE );
     }
@@ -511,17 +518,19 @@ public class DatabaseUserProxy implements User {
 
   @Override
   public Certificate addCertificate( X509Certificate cert ) throws AuthException {
-    try ( final TransactionResource db = Entities.transactionFor( UserEntity.class ) ) {
-      UserEntity user = DatabaseAuthUtils.getUnique( UserEntity.class, "userId", this.delegate.getUserId( ) );
+    EntityWrapper<UserEntity> db = EntityWrapper.get( UserEntity.class );
+    try {
+      UserEntity user = DatabaseAuthUtils.getUnique( db, UserEntity.class, "userId", this.delegate.getUserId( ) );
       CertificateEntity certEntity = new CertificateEntity( X509CertHelper.fromCertificate( cert ) );
       certEntity.setActive( true );
       certEntity.setRevoked( false );
-      Entities.persist( certEntity );
+      db.recast( CertificateEntity.class ).add( certEntity );
       certEntity.setUser( user );
       user.getCertificates( ).add( certEntity );
       db.commit( );
       return new DatabaseCertificateProxy( certEntity );
     } catch ( Exception e ) {
+      db.rollback( );
       Debugging.logError( LOG, e, "Failed to get add certificate " + cert );
       throw new AuthException( e );
     }
@@ -532,11 +541,13 @@ public class DatabaseUserProxy implements User {
     if ( Strings.isNullOrEmpty( certificateId ) ) {
       throw new AuthException( AuthException.EMPTY_CERT_ID );
     }
-    try ( final TransactionResource db = Entities.transactionFor( CertificateEntity.class ) ) {
-      CertificateEntity certificateEntity = DatabaseAuthUtils.getUnique( CertificateEntity.class, "certificateId", certificateId );
+    EntityWrapper<CertificateEntity> db = EntityWrapper.get( CertificateEntity.class );
+    try {
+      CertificateEntity certificateEntity = DatabaseAuthUtils.getUnique( db, CertificateEntity.class, "certificateId", certificateId );
       certificateEntity.setRevoked( true );
       db.commit( );
     } catch ( Exception e ) {
+      db.rollback( );
       Debugging.logError( LOG, e, "Failed to get delete certificate " + certificateId );
       throw new AuthException( e );
     }
@@ -561,11 +572,6 @@ public class DatabaseUserProxy implements User {
   }
 
   @Override
-  public String getAccountNumber( ) throws AuthException {
-    return DatabaseAuthUtils.extract( accountNumberSupplier );
-  }
-
-  @Override
   public Account getAccount( ) throws AuthException {
     final List<Account> results = Lists.newArrayList( );
     try {
@@ -574,9 +580,7 @@ public class DatabaseUserProxy implements User {
           if ( t.getGroups( ).size( ) < 1 ) {
             throw new RuntimeException( "Unexpected group number of the user" );
           }
-          final AccountEntity account =  t.getGroups( ).get( 0 ).getAccount( );
-          Entities.initialize( account );
-          results.add( new DatabaseAccountProxy( account ) );
+          results.add( new DatabaseAccountProxy( t.getGroups( ).get( 0 ).getAccount( ) ) );
         }
       } );
     } catch ( ExecutionException e ) {
@@ -594,11 +598,6 @@ public class DatabaseUserProxy implements User {
       LOG.error( e, e );
       return false;
     }
-  }
-
-  @Override
-  public boolean isSystemUser() {
-    return isSystemAdmin( );
   }
 
   @Override
@@ -620,8 +619,9 @@ public class DatabaseUserProxy implements User {
   @Override
   public List<Policy> getPolicies( ) throws AuthException {
     List<Policy> results = Lists.newArrayList( );
-    try ( final TransactionResource db = Entities.transactionFor( UserEntity.class ) ) {
-      UserEntity user = DatabaseAuthUtils.getUnique( UserEntity.class, "userId", this.delegate.getUserId( ) );
+    EntityWrapper<UserEntity> db = EntityWrapper.get( UserEntity.class );
+    try {
+      UserEntity user = DatabaseAuthUtils.getUnique( db, UserEntity.class, "userId", this.delegate.getUserId( ) );
       GroupEntity group = getUserGroupEntity( user );
       if ( group == null ) {
         throw new RuntimeException( "Can't find user group for user " + this.delegate.getName( ) );
@@ -632,29 +632,21 @@ public class DatabaseUserProxy implements User {
       db.commit( );
       return results;
     } catch ( Exception e ) {
+      db.rollback( );
       Debugging.logError( LOG, e, "Failed to get policies for " + this.delegate );
       throw new AuthException( "Failed to get policies", e );
     }
   }
-
+  
   @Override
   public Policy addPolicy( String name, String policy ) throws AuthException, PolicyParseException {
-    return storePolicy( name, policy, /*allowUpdate*/ false );
-  }
-
-  @Override
-  public Policy putPolicy( String name, String policy ) throws AuthException, PolicyParseException {
-    return storePolicy( name, policy, /*allowUpdate*/ true );
-  }
-
-  private Policy storePolicy( String name, String policy, boolean allowUpdate ) throws AuthException, PolicyParseException {
     try {
       POLICY_NAME_CHECKER.check( name );
     } catch ( InvalidValueException e ) {
       Debugging.logError( LOG, e, "Invalid policy name " + name );
       throw new AuthException( AuthException.INVALID_NAME, e );
     }
-    if ( DatabaseAuthUtils.policyNameinList( name, this.getPolicies( ) ) && !allowUpdate ) {
+    if ( DatabaseAuthUtils.policyNameinList( name, this.getPolicies( ) ) ) {
       Debugging.logError( LOG, null, "Policy name already used: " + name );
       throw new AuthException( AuthException.INVALID_NAME );
     }
@@ -663,27 +655,24 @@ public class DatabaseUserProxy implements User {
       throw new PolicyParseException( "Policy with Allow effect can not be assigned to account/account admin" );
     }
     parsedPolicy.setName( name );
-    try ( final TransactionResource db = Entities.transactionFor( UserEntity.class ) ) {
-      UserEntity userEntity = DatabaseAuthUtils.getUnique( UserEntity.class, "userId", this.delegate.getUserId( ) );
-      final GroupEntity groupEntity = getUserGroupEntity( userEntity );
+    EntityWrapper<UserEntity> db = EntityWrapper.get( UserEntity.class );
+    try {
+      UserEntity userEntity = DatabaseAuthUtils.getUnique( db, UserEntity.class, "userId", this.delegate.getUserId( ) );
+      GroupEntity groupEntity = getUserGroupEntity( userEntity );
       if ( groupEntity == null ) {
         throw new RuntimeException( "Can't find user group for user " + this.delegate.getName( ) );
       }
-      final PolicyEntity remove = DatabaseAuthUtils.removeGroupPolicy( groupEntity, name );
-      if ( remove != null ) {
-        Entities.delete( remove );
-      }
-      Entities.persist( parsedPolicy );
+      db.recast( PolicyEntity.class ).add( parsedPolicy );
       parsedPolicy.setGroup( groupEntity );
       for ( StatementEntity statement : parsedPolicy.getStatements( ) ) {
-        Entities.persist( statement );
+        db.recast( StatementEntity.class ).add( statement );
         statement.setPolicy( parsedPolicy );
         for ( AuthorizationEntity auth : statement.getAuthorizations( ) ) {
-          Entities.persist( auth );
+          db.recast( AuthorizationEntity.class ).add( auth );
           auth.setStatement( statement );
         }
         for ( ConditionEntity cond : statement.getConditions( ) ) {
-          Entities.persist( cond );
+          db.recast( ConditionEntity.class ).add( cond );
           cond.setStatement( statement );
         }
       }
@@ -691,6 +680,7 @@ public class DatabaseUserProxy implements User {
       db.commit( );
       return new DatabasePolicyProxy( parsedPolicy );
     } catch ( Exception e ) {
+      db.rollback( );
       Debugging.logError( LOG, e, "Failed to attach policy for " + this.delegate.getName( ) );
       throw new AuthException( "Failed to attach policy", e );
     }
@@ -701,57 +691,46 @@ public class DatabaseUserProxy implements User {
     if ( Strings.isNullOrEmpty( name ) ) {
       throw new AuthException( AuthException.EMPTY_POLICY_NAME );
     }
-    try ( final TransactionResource db = Entities.transactionFor( UserEntity.class ) ) {
-      UserEntity user = DatabaseAuthUtils.getUnique( UserEntity.class, "userId", this.delegate.getUserId( ) );
+    EntityWrapper<UserEntity> db = EntityWrapper.get( UserEntity.class );
+    try {
+      UserEntity user = DatabaseAuthUtils.getUnique( db, UserEntity.class, "userId", this.delegate.getUserId( ) );
       GroupEntity group = getUserGroupEntity( user );
       if ( group == null ) {
         throw new RuntimeException( "Can't find user group for user " + this.delegate.getName( ) );
       }
       PolicyEntity policy = DatabaseAuthUtils.removeGroupPolicy( group, name );
       if ( policy != null ) {
-        Entities.delete( policy );
+        db.recast( PolicyEntity.class ).delete( policy );
       }
       db.commit( );
     } catch ( Exception e ) {
+      db.rollback( );
       Debugging.logError( LOG, e, "Failed to remove policy " + name + " in " + this.delegate );
       throw new AuthException( "Failed to remove policy", e );
     }
   }
   
-  @SuppressWarnings( "unchecked" )
   @Override
   public List<Authorization> lookupAuthorizations( String resourceType ) throws AuthException {
     String userId = this.delegate.getUserId( );
-    try ( final TransactionResource db = Entities.transactionFor( AuthorizationEntity.class ) ) {
-      List<AuthorizationEntity> authorizations;
-      if ( resourceType == null ) {
-        // Load authorizations for determining if action may be permitted
-        // deny effects are not required
-        authorizations = ( List<AuthorizationEntity> ) Entities
-            .createCriteria( AuthorizationEntity.class ).setCacheable( true ).add(
-                Restrictions.eq( "effect", EffectType.Allow )
-            )
-            .createCriteria( "statement" ).setCacheable( true )
-            .createCriteria( "policy" ).setCacheable( true )
-            .createCriteria( "group" ).setCacheable( true )
-            .createCriteria( "users" ).setCacheable( true ).add(
-                Restrictions.eq( "userId", userId )
-            )
-            .list();
-      } else {
-          authorizations = ( List<AuthorizationEntity> ) Entities
-              .createCriteria( AuthorizationEntity.class ).setCacheable( true ).add(
-                  Restrictions.and(
-                      Restrictions.eq( "type", resourceType ),
-                      Restrictions.or(
-                          Restrictions.eq( "effect", EffectType.Allow ),
-                          Restrictions.eq( "effect", EffectType.Deny ) ) ) )
-              .createCriteria( "statement" ).setCacheable( true )
-              .createCriteria( "policy" ).setCacheable( true )
-              .createCriteria( "group" ).setCacheable( true )
-              .createCriteria( "users" ).setCacheable( true ).add(Restrictions.eq( "userId", userId ) )
-              .list();
-      }
+    if ( resourceType == null ) {
+      throw new AuthException( "Empty resource type" );
+    }
+    EntityWrapper<AuthorizationEntity> db = EntityWrapper.get( AuthorizationEntity.class );
+    try {
+      @SuppressWarnings( "unchecked" )
+      List<AuthorizationEntity> authorizations = ( List<AuthorizationEntity> ) db
+          .createCriteria( AuthorizationEntity.class ).setCacheable( true ).add(
+              Restrictions.and(
+                  Restrictions.eq( "type", resourceType ),
+                  Restrictions.or( 
+                      Restrictions.eq( "effect", EffectType.Allow ),
+                      Restrictions.eq( "effect", EffectType.Deny ) ) ) )
+          .createCriteria( "statement" ).setCacheable( true )
+          .createCriteria( "policy" ).setCacheable( true )
+          .createCriteria( "group" ).setCacheable( true )
+          .createCriteria( "users" ).setCacheable( true ).add(Restrictions.eq( "userId", userId ) )
+          .list( );
       db.commit( );
       List<Authorization> results = Lists.newArrayList( );
       for ( AuthorizationEntity auth : authorizations ) {
@@ -759,6 +738,7 @@ public class DatabaseUserProxy implements User {
       }
       return results;
     } catch ( Exception e ) {
+      db.rollback( );
       Debugging.logError( LOG, e, "Failed to lookup authorization for user with ID " + userId + ", type=" + resourceType);
       throw new AuthException( "Failed to lookup auth", e );
     }
@@ -767,9 +747,10 @@ public class DatabaseUserProxy implements User {
   @Override
   public List<Authorization> lookupQuotas( String resourceType ) throws AuthException {
     String userId = this.delegate.getUserId( );
-    try ( final TransactionResource db = Entities.transactionFor( AuthorizationEntity.class ) ) {
+    EntityWrapper<AuthorizationEntity> db = EntityWrapper.get( AuthorizationEntity.class );
+    try {
       @SuppressWarnings( "unchecked" )
-      List<AuthorizationEntity> authorizations = ( List<AuthorizationEntity> ) Entities
+      List<AuthorizationEntity> authorizations = ( List<AuthorizationEntity> ) db
           .createCriteria( AuthorizationEntity.class ).setCacheable( true ).add(
               Restrictions.and(
                   Restrictions.eq( "type", resourceType ),
@@ -786,34 +767,10 @@ public class DatabaseUserProxy implements User {
       }
       return results;
     } catch ( Exception e ) {
+      db.rollback( );
       Debugging.logError( LOG, e, "Failed to lookup quotas for user with ID " + userId + ", type=" + resourceType);
       throw new AuthException( "Failed to lookup quota", e );
     }
   }
 
-  private Supplier<Map<String,String>> getUserInfoSupplier( ) {
-    return new Supplier<Map<String, String>>() {
-      @Override
-      public Map<String, String> get() {
-        final Map<String, String> results = Maps.newHashMap( );
-        try {
-          DatabaseAuthUtils.invokeUnique( UserEntity.class, "userId", DatabaseUserProxy.this.delegate.getUserId( ), new Tx<UserEntity>( ) {
-            public void fire( UserEntity t ) {
-              results.putAll( t.getInfo( ) );
-            }
-          } );
-        } catch ( ExecutionException e ) {
-          Debugging.logError( LOG, e, "Failed to getInfo for " + DatabaseUserProxy.this.delegate );
-          throw new RuntimeException( new AuthException( e ).fillInStackTrace( ) );
-        }
-        return results;
-      }
-    };
-  }
-
-  private void readObject( ObjectInputStream in) throws IOException, ClassNotFoundException {
-    in.defaultReadObject( );
-    this.accountNumberSupplier = DatabaseAuthUtils.getAccountNumberSupplier( this );
-    this.userInfoSupplier = getUserInfoSupplier( );
-  }
 }

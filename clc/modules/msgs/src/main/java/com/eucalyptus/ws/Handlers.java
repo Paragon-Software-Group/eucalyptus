@@ -1,5 +1,5 @@
 /*************************************************************************
- * Copyright 2009-2014 Eucalyptus Systems, Inc.
+ * Copyright 2009-2013 Eucalyptus Systems, Inc.
  *
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -63,9 +63,6 @@
 package com.eucalyptus.ws;
 
 import java.net.SocketAddress;
-import com.eucalyptus.auth.AuthContextSupplier;
-import static com.eucalyptus.util.RestrictedTypes.findPolicyVendor;
-import static com.eucalyptus.util.RestrictedTypes.getIamActionByMessageType;
 import java.net.URI;
 import java.util.*;
 import java.util.concurrent.ConcurrentMap;
@@ -91,7 +88,6 @@ import org.jboss.netty.handler.timeout.IdleStateEvent;
 import org.jboss.netty.handler.timeout.IdleStateHandler;
 import org.jboss.netty.util.HashedWheelTimer;
 
-import com.eucalyptus.auth.Permissions;
 import com.eucalyptus.auth.principal.User;
 import com.eucalyptus.binding.BindingManager;
 import com.eucalyptus.bootstrap.Bootstrap;
@@ -99,7 +95,6 @@ import com.eucalyptus.bootstrap.Hosts;
 import com.eucalyptus.component.*;
 import com.eucalyptus.component.annotation.ComponentMessage;
 import com.eucalyptus.component.id.Eucalyptus;
-import com.eucalyptus.context.Context;
 import com.eucalyptus.context.Contexts;
 import com.eucalyptus.context.ServiceStateException;
 import com.eucalyptus.crypto.util.SslSetup;
@@ -664,13 +659,8 @@ public class Handlers {
       final MappingHttpMessage request = MappingHttpMessage.extractMessage( e );
       final BaseMessage msg = BaseMessage.extractMessage( e );
       if ( ( request != null ) && ( msg != null ) ) {
-        final Context context = Contexts.lookup( request.getCorrelationId( ) );
-        final User user = context.getUser( );
-        final AuthContextSupplier userContext = context.getAuthContext( );
-        if ( user.isSystemAdmin( ) ||
-            ( context.isImpersonated( ) && isImpersonationSupported( msg ) ) ||
-            ( ( user.isSystemUser( ) || ServiceOperations.isUserOperation( msg ) ) &&
-              Permissions.isAuthorized( findPolicyVendor( msg.getClass( ) ), "", "", null, getIamActionByMessageType( msg ), userContext ) ) ) {
+        final User user = Contexts.lookup( request.getCorrelationId( ) ).getUser( );
+        if ( user.isSystemAdmin( ) || ServiceOperations.isUserOperation( msg ) ) {
           ctx.sendUpstream( e );
         } else {
           Contexts.clear( Contexts.lookup( msg.getCorrelationId( ) ) );
@@ -727,15 +717,5 @@ public class Handlers {
         requestHost != null &&
         requestPath != null &&
         uri.contains( requestHost + requestPath );
-  }
-
-  private static boolean isImpersonationSupported( final BaseMessage message ) {
-    boolean impersonationSupported = false;
-    final ComponentMessage componentMessage = message==null ? null :
-        Ats.inClassHierarchy( message.getClass() ).get( ComponentMessage.class );
-    if ( componentMessage != null ) {
-      impersonationSupported = ComponentIds.lookup( componentMessage.value( ) ).isImpersonationSupported( );
-    }
-    return impersonationSupported;
   }
 }

@@ -70,7 +70,6 @@ import java.util.List
 import com.eucalyptus.records.*
 import com.google.common.collect.*
 import edu.ucsb.eucalyptus.msgs.*
-import com.google.common.base.Joiner
 
 public class Pair {
   
@@ -98,7 +97,7 @@ public class VmDescribeResponseType extends CloudClusterMessage {
   String originCluster;
   ArrayList<VmInfo> vms = new ArrayList<VmInfo>();
   public String toString() {
-    return "${this.getClass().getSimpleName()} " + Joiner.on("\n${this.getClass().getSimpleName()} " as String).join(vms.iterator());
+    return "${this.getClass().getSimpleName()} " + vms*.toString().join("\n${this.getClass().getSimpleName()} ");
   }
 }
 
@@ -158,7 +157,7 @@ public class VirtualBootRecord extends EucalyptusData implements Cloneable {
   def VirtualBootRecord() {
   }
   
-  def VirtualBootRecord(String id, String resourceLocation, String type, String guestDeviceName, Long sizeBytes, String format) {
+  def VirtualBootRecord(final id, final resourceLocation, final type, final guestDeviceName, final sizeBytes, final format) {
     this.id = id;
     this.resourceLocation = resourceLocation;
     this.type = type;
@@ -171,8 +170,8 @@ public class VirtualBootRecord extends EucalyptusData implements Cloneable {
     return "ebs".equals( this.type );
   }
   
-  public VirtualBootRecord clone( ) {
-    return (VirtualBootRecord) super.clone();
+  public Object clone( ) {
+    return super.clone();
   }
 }
 
@@ -255,7 +254,7 @@ public class NodeInfo implements Comparable {
   }
   
   
-  public void touch(Component.State lastState, String lastMessage, Faults.CheckException lastEx ) {
+  public void touch(Component.State lastState, String lastMessage, Exception lastEx ) {
     this.lastSeen = new Date();
     this.lastException = lastEx;
     this.lastState = lastState;

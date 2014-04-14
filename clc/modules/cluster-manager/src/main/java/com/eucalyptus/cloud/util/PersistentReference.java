@@ -1,5 +1,5 @@
 /*************************************************************************
- * Copyright 2009-2014 Eucalyptus Systems, Inc.
+ * Copyright 2009-2012 Eucalyptus Systems, Inc.
  *
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -62,9 +62,9 @@
 
 package com.eucalyptus.cloud.util;
 
-import java.util.Objects;
 import javax.annotation.Nullable;
 import javax.persistence.MappedSuperclass;
+import org.apache.log4j.Logger;
 import com.eucalyptus.entities.Entities;
 import com.eucalyptus.entities.UserMetadata;
 import com.eucalyptus.util.HasNaturalId;
@@ -73,7 +73,8 @@ import com.eucalyptus.util.OwnerFullName;
 @MappedSuperclass
 public abstract class PersistentReference<T extends PersistentReference<T, R>, R extends HasNaturalId> extends UserMetadata<Reference.State> implements Reference<T, R> {
   private static final long serialVersionUID = 1L;
-
+  private static Logger     LOG              = Logger.getLogger( PersistentReference.class );
+  
   protected PersistentReference( final OwnerFullName owner, final String displayName ) {
     super( owner, displayName );
   }
@@ -85,6 +86,8 @@ public abstract class PersistentReference<T extends PersistentReference<T, R>, R
   
   /**
    * Referer may be null!
+   * 
+   * @param referer
    */
   protected abstract void setReference( @Nullable R referer );
   
@@ -98,7 +101,8 @@ public abstract class PersistentReference<T extends PersistentReference<T, R>, R
    */
   @Override
   public final T allocate( ) throws ResourceAllocationException {
-    return this.doSetReferer( null, Reference.State.FREE, Reference.State.PENDING );
+    this.doSetReferer( null, Reference.State.FREE, Reference.State.PENDING );
+    return ( T ) this;
   }
   
   /**
@@ -110,7 +114,8 @@ public abstract class PersistentReference<T extends PersistentReference<T, R>, R
    */
   @Override
   public T release( ) throws ResourceAllocationException {
-    return this.doSetReferer( null, null, Reference.State.FREE );
+    final T ret = this.doSetReferer( null, null, Reference.State.FREE );
+    return ( T ) this;
   }
   
   /**
@@ -123,52 +128,59 @@ public abstract class PersistentReference<T extends PersistentReference<T, R>, R
   @Override
   public final boolean teardown( ) throws ResourceAllocationException {
     Entities.delete( this );
+    this.setId( null );
     return true;
   }
   
   /**
    * {@inheritDoc ResourceAlllocation#reclaim()}
+   * 
+   * @see Reference#reclaim(com.eucalyptus.util.HasNaturalId)
+   * @param referer
+   * @return
+   * @throws ResourceAllocationException
    */
   @Override
   public final T reclaim( final R referer ) throws ResourceAllocationException {
-    return this.doSetReferer( referer, null, State.EXTANT );
+    final T ret = PersistentReference.this.doSetReferer( referer, null, Reference.State.EXTANT );
+    return ret;
   }
   
-  protected T doSetReferer( final R referer, final Reference.State preconditionState, final Reference.State finalState ) throws ResourceAllocationException {
+  @SuppressWarnings( "unchecked" )
+  T doSetReferer( final R referer, final Reference.State preconditionState, final Reference.State finalState ) throws ResourceAllocationException {
     this.checkPreconditions( referer, preconditionState, finalState );
     if ( ( referer != null ) && !Reference.State.PENDING.equals( finalState ) ) {
-      this.setReference( referer );
+      final R refererEntity = referer;
+      this.setReference( refererEntity );
       this.setState( finalState );
     } else {
       this.setReference( null );
       this.setState( finalState );
     }
-    return get( );
+    return ( T ) this;
   }
-
-  protected void ensureTransaction( ) {
+  
+  private void checkPreconditions( R referer, final Reference.State preconditionState, Reference.State finalState ) throws RuntimeException {
     if ( ( !Entities.hasTransaction( this ) ) ) {
       throw new RuntimeException( "Error allocating resource " + PersistentReference.this.getClass( ).getSimpleName( ) + " with id "
-          + this.getDisplayName( ) + " as there is no ongoing transaction." );
+                                  + this.getDisplayName( ) + " as there is no ongoing transaction." );
     }
-  }
-
-  private void checkPreconditions( R referer, final Reference.State preconditionState, Reference.State finalState ) throws RuntimeException {
-    ensureTransaction( );
     State currentState = this.getState( );
     boolean matchPrecondition = preconditionState == null || ( currentState != null && preconditionState.equals( currentState ) );
     boolean matchFinal = ( finalState == null && currentState == null ) || ( finalState != null && currentState != null && finalState.equals( currentState ) );
     boolean matchReferer = ( this.getReference( ) == null ) || ( referer != null && this.getReference( ) != null && referer.equals( this.getReference( ) ) );
-    if ( !( ( matchFinal && matchReferer ) || matchPrecondition ) ) {
+    if ( ( matchFinal && matchReferer ) || matchPrecondition ) {
+      return;
+    } else {
       throw new RuntimeException( "Error allocating resource " + PersistentReference.this.getClass( ).getSimpleName( )
         + " with id "
         + this.getDisplayName( )
         + " as the state is not either the precondition "
         + preconditionState.name( )
         + " or the final state "
-        + Objects.toString( finalState )
+        + finalState.name( )
         + " (currently "
-        + Objects.toString( currentState )
+        + currentState.name( )
         + ", referer "
         + this.getReference( )
         + ", passed referer "
@@ -179,6 +191,7 @@ public abstract class PersistentReference<T extends PersistentReference<T, R>, R
   
   @Override
   public T set( final R referer ) throws ResourceAllocationException {
-    return this.doSetReferer( referer, State.PENDING, State.EXTANT );
+    final T ret = PersistentReference.this.doSetReferer( referer, Reference.State.PENDING, Reference.State.EXTANT );
+    return ret;
   }
 }

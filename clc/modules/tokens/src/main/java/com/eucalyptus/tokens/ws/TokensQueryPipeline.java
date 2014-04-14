@@ -1,5 +1,5 @@
 /*************************************************************************
- * Copyright 2009-2013 Eucalyptus Systems, Inc.
+ * Copyright 2009-2012 Eucalyptus Systems, Inc.
  *
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -19,8 +19,6 @@
  ************************************************************************/
 package com.eucalyptus.tokens.ws;
 
-import static com.eucalyptus.auth.principal.TemporaryAccessKey.TemporaryKeyType;
-import java.util.Collections;
 import java.util.EnumSet;
 import java.util.Map;
 import javax.security.auth.login.CredentialExpiredException;
@@ -62,11 +60,7 @@ public class TokensQueryPipeline extends QueryPipeline {
   private final TokensAuthenticationStage auth = new TokensAuthenticationStage( super.getAuthenticationStage() );
 
   public TokensQueryPipeline() {
-    super(
-        "tokens-query-pipeline",
-        "/services/Tokens",
-        EnumSet.of( TemporaryKeyType.Role ),
-        EnumSet.of( RequiredQueryParams.Version ) );
+    super( "tokens-query-pipeline", "/services/Tokens", false, EnumSet.of( RequiredQueryParams.Version ) );
   }
 
   @Override

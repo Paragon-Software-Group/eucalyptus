@@ -1,5 +1,5 @@
 /*************************************************************************
- * Copyright 2009-2014 Eucalyptus Systems, Inc.
+ * Copyright 2009-2012 Eucalyptus Systems, Inc.
  *
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -62,8 +62,6 @@
 
 package com.eucalyptus.cloud.ws;
 
-import com.eucalyptus.entities.Entities;
-import com.eucalyptus.entities.TransactionResource;
 import com.eucalyptus.util.DNSProperties;
 
 import edu.ucsb.eucalyptus.cloud.entities.*;
@@ -73,6 +71,7 @@ import com.eucalyptus.bootstrap.Bootstrap;
 import com.eucalyptus.dns.ServiceZone;
 import com.eucalyptus.dns.TransientZone;
 import com.eucalyptus.dns.Zone;
+import com.eucalyptus.entities.EntityWrapper;
 
 import org.xbill.DNS.Address;
 import org.xbill.DNS.CNAMERecord;
@@ -83,6 +82,7 @@ import org.xbill.DNS.SOARecord;
 import org.xbill.DNS.ARecord;
 import org.xbill.DNS.Name;
 import org.xbill.DNS.NSRecord;
+import org.xbill.DNS.Type;
 
 import java.net.InetAddress;
 import java.util.Iterator;
@@ -184,41 +184,43 @@ public class ZoneManager {
 				zone =  zones.putIfAbsent(name, zone);
 				if(zone == null) {
 					zone = zones.get(name);
-					try ( final TransactionResource db = Entities.transactionFor( ZoneInfo.class ) ) {
-						ZoneInfo zoneInfo = new ZoneInfo(nameString);
-						Entities.persist(zoneInfo);
-						SOARecordInfo soaRecordInfo = new SOARecordInfo();
-						soaRecordInfo.setName(nameString);
-						soaRecordInfo.setRecordclass(DClass.IN);
-						soaRecordInfo.setNameserver(nameString);
-						soaRecordInfo.setAdmin("root." + nameString);
-						soaRecordInfo.setZone(nameString);
-						soaRecordInfo.setSerialNumber(serial);
-						soaRecordInfo.setTtl(soaTTL);
-						soaRecordInfo.setExpires(expires);
-						soaRecordInfo.setMinimum(minimum);
-						soaRecordInfo.setRefresh(refresh);
-						soaRecordInfo.setRetry(retry);
-						Entities.persist(soaRecordInfo);
+					EntityWrapper<ZoneInfo> db = EntityWrapper.get(ZoneInfo.class);
+					ZoneInfo zoneInfo = new ZoneInfo(nameString);
+					db.add(zoneInfo);
+					EntityWrapper<SOARecordInfo> dbSOA = db.recast(SOARecordInfo.class);
+					SOARecordInfo soaRecordInfo = new SOARecordInfo();
+					soaRecordInfo.setName(nameString);
+					soaRecordInfo.setRecordclass(DClass.IN);
+					soaRecordInfo.setNameserver(nameString);
+					soaRecordInfo.setAdmin("root." + nameString);
+					soaRecordInfo.setZone(nameString);
+					soaRecordInfo.setSerialNumber(serial);
+					soaRecordInfo.setTtl(soaTTL);
+					soaRecordInfo.setExpires(expires);
+					soaRecordInfo.setMinimum(minimum);
+					soaRecordInfo.setRefresh(refresh);
+					soaRecordInfo.setRetry(retry);
+					dbSOA.add(soaRecordInfo);
 
-						NSRecordInfo nsRecordInfo = new NSRecordInfo();
-						nsRecordInfo.setName(nameString);
-						nsRecordInfo.setZone(nameString);
-						nsRecordInfo.setRecordClass(DClass.IN);
-						nsRecordInfo.setTarget(nsHost);
-						nsRecordInfo.setTtl(nsTTL);
-						Entities.persist(nsRecordInfo);
+					EntityWrapper<NSRecordInfo> dbNS = db.recast(NSRecordInfo.class);
+					NSRecordInfo nsRecordInfo = new NSRecordInfo();
+					nsRecordInfo.setName(nameString);
+					nsRecordInfo.setZone(nameString);
+					nsRecordInfo.setRecordClass(DClass.IN);
+					nsRecordInfo.setTarget(nsHost);
+					nsRecordInfo.setTtl(nsTTL);
+					dbNS.add(nsRecordInfo);
 
-						ARecordInfo aRecordInfo = new ARecordInfo();
-						aRecordInfo.setName(nsHost);
-						aRecordInfo.setAddress(DNSProperties.NS_IP);
-						aRecordInfo.setTtl(nsTTL);
-						aRecordInfo.setZone(nameString);
-						aRecordInfo.setRecordclass(DClass.IN);
-						Entities.persist(aRecordInfo);
+					EntityWrapper<ARecordInfo> dbARecord = db.recast(ARecordInfo.class);
+					ARecordInfo aRecordInfo = new ARecordInfo();
+					aRecordInfo.setName(nsHost);
+					aRecordInfo.setAddress(DNSProperties.NS_IP);
+					aRecordInfo.setTtl(nsTTL);
+					aRecordInfo.setZone(nameString);
+					aRecordInfo.setRecordclass(DClass.IN);
+					dbARecord.add(aRecordInfo);
 
-						db.commit();
-					}
+					db.commit();
 				}
 			} catch(Exception ex) {
 				LOG.error(ex);
@@ -249,19 +251,18 @@ public class ZoneManager {
 					zone.removeRecord(recordToRemove);
 				zone.addRecord(record);
 				//now change the persistent store
-				try ( final TransactionResource db = Entities.transactionFor( ARecordInfo.class ) ) {
-					ARecordInfo arecInfo = new ARecordInfo();
-					arecInfo.setZone(zoneName);
-					arecInfo.setName(record.getName().toString());
-					ARecordInfo foundARecInfo = Entities.uniqueResult(arecInfo);
-					foundARecInfo.setName(record.getName().toString());
-					InetAddress address = record.getAddress();
-					if(address != null)
-						foundARecInfo.setAddress(address.toString());
-					foundARecInfo.setRecordclass(record.getDClass());
-					foundARecInfo.setTtl(record.getTTL());
-					db.commit();
-				}
+				EntityWrapper<ARecordInfo> db = EntityWrapper.get(ARecordInfo.class);
+				ARecordInfo arecInfo = new ARecordInfo();
+				arecInfo.setZone(zoneName);
+				arecInfo.setName(record.getName().toString());
+				ARecordInfo foundARecInfo = db.getUnique(arecInfo);
+				foundARecInfo.setName(record.getName().toString());
+				InetAddress address = record.getAddress();
+				if(address != null)
+					foundARecInfo.setAddress(address.toString());
+				foundARecInfo.setRecordclass(record.getDClass());
+				foundARecInfo.setTtl(record.getTTL());
+				db.commit();
 			}
 		} catch(Exception ex) {
 			LOG.error(ex);
@@ -288,17 +289,16 @@ public class ZoneManager {
 					zone.removeRecord(recordToRemove);
 				zone.addRecord(record);
 				//now change the persistent store
-				try ( final TransactionResource db = Entities.transactionFor( CNAMERecordInfo.class ) ) {
-					CNAMERecordInfo cnameRecordInfo = new CNAMERecordInfo();
-					cnameRecordInfo.setZone(zoneName);
-					cnameRecordInfo.setName(record.getName().toString());
-					CNAMERecordInfo foundCNAMERecInfo = Entities.uniqueResult(cnameRecordInfo);
-					foundCNAMERecInfo.setName(record.getName().toString());
-					foundCNAMERecInfo.setAlias(record.getAlias().toString());
-					foundCNAMERecInfo.setRecordclass(record.getDClass());
-					foundCNAMERecInfo.setTtl(record.getTTL());
-					db.commit();
-				}
+				EntityWrapper<CNAMERecordInfo> db = EntityWrapper.get(CNAMERecordInfo.class);
+				CNAMERecordInfo cnameRecordInfo = new CNAMERecordInfo();
+				cnameRecordInfo.setZone(zoneName);
+				cnameRecordInfo.setName(record.getName().toString());
+				CNAMERecordInfo foundCNAMERecInfo = db.getUnique(cnameRecordInfo);
+				foundCNAMERecInfo.setName(record.getName().toString());
+				foundCNAMERecInfo.setAlias(record.getAlias().toString());
+				foundCNAMERecInfo.setRecordclass(record.getDClass());
+				foundCNAMERecInfo.setTtl(record.getTTL());
+				db.commit();
 			}
 		} catch(Exception ex) {
 			LOG.error(ex);

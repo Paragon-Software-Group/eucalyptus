@@ -129,7 +129,12 @@ public class UnassignAddressCallback extends MessageCallback<UnassignAddressType
   public void clearVmAddress( ) {
     final String privateIp = super.getRequest( ).getDestination( );
     final String publicIp = super.getRequest( ).getSource( );
-    Addresses.updatePublicIPOnMatch( privateIp, publicIp, VmNetworkConfig.DEFAULT_IP );
+    Addresses.updatePublicIPOnMatch( privateIp, publicIp, new Function<VmInstance,String>(){
+      @Override
+      public String apply( final VmInstance vmInstance ) {
+        return vmInstance.getPrivateAddress();
+      }
+    } );
   }
   
   @Override

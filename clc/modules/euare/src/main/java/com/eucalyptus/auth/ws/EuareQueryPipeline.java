@@ -1,5 +1,5 @@
 /*************************************************************************
- * Copyright 2009-2013 Eucalyptus Systems, Inc.
+ * Copyright 2009-2012 Eucalyptus Systems, Inc.
  *
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -62,7 +62,6 @@
 
 package com.eucalyptus.auth.ws;
 
-import static com.eucalyptus.auth.principal.TemporaryAccessKey.TemporaryKeyType;
 import java.util.EnumSet;
 import org.jboss.netty.channel.ChannelPipeline;
 import com.eucalyptus.component.annotation.ComponentPart;
@@ -74,12 +73,9 @@ import com.eucalyptus.ws.server.QueryPipeline;
 public class EuareQueryPipeline extends QueryPipeline {
 
   public EuareQueryPipeline( ) {
-    super(
-        "euare-query-pipeline",
-        "/services/Euare",
-        EnumSet.of( TemporaryKeyType.Role, TemporaryKeyType.Access ),
-        EnumSet.of( RequiredQueryParams.Version ));
+    super("euare-query-pipeline", "/services/Euare", false, EnumSet.of( RequiredQueryParams.Version ));
   }
+
 
   @Override
   public ChannelPipeline addHandlers( final ChannelPipeline pipeline ) {

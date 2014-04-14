@@ -75,7 +75,7 @@ public class LogUtil {
   }
   
   public static String errorheader( String message, Exception e ) {
-    String.format( "%80.80s\n%s\n%1\$80.80s", MINI_BAR, message ).replaceAll("-","*");
+    String msg = String.format( "%80.80s\n%s\n%1\$80.80s", MINI_BAR, message ).replaceAll("-","*");
   }
   public static String subheader( String message ) {
     return String.format( "%80.80s\n%s\n%1\$80.80s", MINI_BAR, message );
@@ -83,13 +83,8 @@ public class LogUtil {
 
   public static String dumpObject( Object o ) {
     try {
-      return o.dump()
-          .replace("<","[")
-          .replace(">","]")
-          .replaceAll("[\\w\\.]+\\.(\\w+)@\\w*", '$1')
-          .replaceAll("class:class [\\w\\.]+\\.(\\w+),", '$1');
+      return o.dump().replaceAll("<","[").replaceAll(">","]").replaceAll("[\\w\\.]+\\.(\\w+)@\\w*", { Object[] it -> it[1] }).replaceAll("class:class [\\w\\.]+\\.(\\w+),", { Object[] it -> it[1] });
     } catch( Exception e ) {
-      LOG.error( e, e )
       return ""+o;
     }
   }
@@ -102,7 +97,7 @@ public class LogUtil {
     LOG.info( message );
     return singleton;
   }
-  public static LogUtil logHeader( String message ) {
+  public static LogUtil logHeader( Object message ) {
     LOG.info( LogUtil.subheader( message ) );
     return singleton;
   }

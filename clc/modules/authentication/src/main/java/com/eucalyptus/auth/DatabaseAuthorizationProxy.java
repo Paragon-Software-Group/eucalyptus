@@ -71,7 +71,6 @@ import com.eucalyptus.auth.principal.Authorization;
 import com.eucalyptus.auth.principal.Condition;
 import com.eucalyptus.auth.principal.Group;
 import com.eucalyptus.auth.principal.Principal;
-import com.eucalyptus.entities.Entities;
 import com.eucalyptus.entities.Transactions;
 import java.util.concurrent.ExecutionException;
 import com.eucalyptus.util.Tx;
@@ -138,11 +137,6 @@ public class DatabaseAuthorizationProxy implements Authorization {
   }
 
   @Override
-  public String getAccount() {
-    return this.delegate.getAccount( );
-  }
-
-  @Override
   public String getType( ) {
     return this.delegate.getType( );
   }
@@ -199,9 +193,6 @@ public class DatabaseAuthorizationProxy implements Authorization {
       Transactions.one( AuthorizationEntity.newInstanceWithId( this.delegate.getAuthorizationId() ), new Tx<AuthorizationEntity>( ) {
         @Override
         public void fire( AuthorizationEntity authorizationEntity ) {
-          if ( authorizationEntity.getStatement().getPrincipal() != null ) {
-            Entities.initialize( authorizationEntity.getStatement().getPrincipal().getValues() );
-          }
           results.add( new DatabasePrincipalProxy( authorizationEntity.getStatement().getPrincipal() ) );
         }
       } );

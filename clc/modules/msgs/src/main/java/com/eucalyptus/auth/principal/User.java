@@ -1,5 +1,5 @@
 /*************************************************************************
- * Copyright 2009-2014 Eucalyptus Systems, Inc.
+ * Copyright 2009-2013 Eucalyptus Systems, Inc.
  *
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -64,7 +64,6 @@ package com.eucalyptus.auth.principal;
 
 import java.io.Serializable;
 import java.security.cert.X509Certificate;
-import java.util.Date;
 import java.util.List;
 import java.util.Map;
 import com.eucalyptus.auth.AuthException;
@@ -73,78 +72,77 @@ import com.eucalyptus.auth.AuthException;
  * The interface for a user in Eucalyptus.
  * 
  * @author decker
+ *
  */
 public interface User extends /*HasId, */AuthorizedPrincipal, Serializable {
   
-  String USER_GROUP_PREFIX = "_";  
-  String ACCOUNT_ADMIN = "admin";
-  String ACCOUNT_NOBODY = "nobody";
+  public static final String USER_GROUP_PREFIX = "_";  
+  public static final String ACCOUNT_ADMIN = "admin";
+  public static final String ACCOUNT_NOBODY = "nobody";
   
-  String EMAIL = "email";
+  public static final String EMAIL = "email";
   // LDAP user full DN
-  String DN = "dn";
+  public static final String DN = "dn";
   // LDAP user SASL ID
-  String SASLID = "saslid";
+  public static final String SASLID = "saslid";
   
-  Long PASSWORD_LIFETIME = 1000 * 60 * 60 * 24 * 60L; // 2 months
-  Long RECOVERY_EXPIRATION = 1000 * 60 * 30L; // 30 minutes
+  public static final Long PASSWORD_LIFETIME = 1000 * 60 * 60 * 24 * 60L; // 2 months
+  public static final Long RECOVERY_EXPIRATION = 1000 * 60 * 30L; // 30 minutes
   
-  enum RegistrationStatus {
+  public static enum RegistrationStatus {
     REGISTERED,
     APPROVED,
     CONFIRMED,
   }
   
-  String getUserId( );
-  void setName( String name ) throws AuthException;
+  public String getUserId( );
+  public void setName( String name ) throws AuthException;
   
-  String getPath( );
-  void setPath( String path ) throws AuthException;
-
-  Date getCreateDate( );
-
-  RegistrationStatus getRegistrationStatus( );
-  void setRegistrationStatus( RegistrationStatus stat ) throws AuthException;
-
-  Boolean isEnabled( );
-  void setEnabled( Boolean enabled ) throws AuthException;
-  
-  String getToken( );
-  void setToken( String token ) throws AuthException;
-  String resetToken( ) throws AuthException;
-  
-  String getConfirmationCode( );
-  void setConfirmationCode( String code ) throws AuthException;
-  void createConfirmationCode( ) throws AuthException;
+  public String getPath( );
+  public void setPath( String path ) throws AuthException;
     
-  String getPassword( );  
-  void setPassword( String password ) throws AuthException;
+  public RegistrationStatus getRegistrationStatus( );
+  public void setRegistrationStatus( RegistrationStatus stat ) throws AuthException;
 
-  Long getPasswordExpires( );
-  void setPasswordExpires( Long time ) throws AuthException;
+  public Boolean isEnabled( );
+  public void setEnabled( Boolean enabled ) throws AuthException;
   
-  String getInfo( String key ) throws AuthException;
-  Map<String, String> getInfo( ) throws AuthException;
-  void setInfo( String key, String value ) throws AuthException;  
-  void setInfo( Map<String, String> newInfo ) throws AuthException;
-  void removeInfo( String key ) throws AuthException;
+  public String getToken( );
+  public void setToken( String token ) throws AuthException;
+  public String resetToken( ) throws AuthException;
   
-  List<AccessKey> getKeys( ) throws AuthException;
-  AccessKey getKey( String keyId ) throws AuthException;
-  void removeKey( String keyId ) throws AuthException;
-  AccessKey createKey( ) throws AuthException;
+  public String getConfirmationCode( );
+  public void setConfirmationCode( String code ) throws AuthException;
+  public void createConfirmationCode( ) throws AuthException;
+    
+  public String getPassword( );  
+  public void setPassword( String password ) throws AuthException;
+  public void createPassword( ) throws AuthException;
   
-  List<Certificate> getCertificates( ) throws AuthException;
-  Certificate getCertificate( String certificateId ) throws AuthException;
-  Certificate addCertificate( X509Certificate certificate ) throws AuthException;
-  void removeCertificate( String certificateId ) throws AuthException;
+  public Long getPasswordExpires( );
+  public void setPasswordExpires( Long time ) throws AuthException;
   
-  List<Group> getGroups( ) throws AuthException;
+  public String getInfo( String key ) throws AuthException;
+  public Map<String, String> getInfo( ) throws AuthException;
+  public void setInfo( String key, String value ) throws AuthException;  
+  public void setInfo( Map<String, String> newInfo ) throws AuthException;
+  public void removeInfo( String key ) throws AuthException;
   
-  boolean isSystemAdmin( );
+  public List<AccessKey> getKeys( ) throws AuthException;
+  public AccessKey getKey( String keyId ) throws AuthException;
+//  public AccessKey addKey( String key ) throws AuthException;
+  public void removeKey( String keyId ) throws AuthException;
+  public AccessKey createKey( ) throws AuthException;
   
-  boolean isSystemUser( );
+  public List<Certificate> getCertificates( ) throws AuthException;
+  public Certificate getCertificate( String certificateId ) throws AuthException;
+  public Certificate addCertificate( X509Certificate certificate ) throws AuthException;
+  public void removeCertificate( String certficateId ) throws AuthException;
   
-  boolean isAccountAdmin( );
+  public List<Group> getGroups( ) throws AuthException;
+  
+  public boolean isSystemAdmin( );
+  
+  public boolean isAccountAdmin( );
 
 }

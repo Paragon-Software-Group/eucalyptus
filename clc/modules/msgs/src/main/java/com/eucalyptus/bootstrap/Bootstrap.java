@@ -89,7 +89,6 @@ import com.eucalyptus.system.Threads;
 import com.eucalyptus.system.Threads.ThreadPool;
 import com.eucalyptus.util.Exceptions;
 import com.eucalyptus.util.LogUtil;
-import com.eucalyptus.util.fsm.OrderlyTransitionException;
 import com.google.common.base.Joiner;
 import com.google.common.base.Predicate;
 import com.google.common.collect.Iterables;
@@ -606,9 +605,7 @@ public class Bootstrap {
         Topology.transition( state ).apply( config ).get( );
       } catch ( Exception ex ) {
         Exceptions.maybeInterrupted( ex );
-        if ( !Exceptions.isCausedBy( ex, OrderlyTransitionException.class ) ) {
-          LOG.error( ex );
-        }
+        LOG.error( ex );
         Logs.extreme( ).error( ex, ex );
       }
     }

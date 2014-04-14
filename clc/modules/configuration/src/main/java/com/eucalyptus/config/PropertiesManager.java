@@ -1,5 +1,5 @@
 /*************************************************************************
- * Copyright 2009-2014 Eucalyptus Systems, Inc.
+ * Copyright 2009-2012 Eucalyptus Systems, Inc.
  *
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -110,8 +110,13 @@ public class PropertiesManager {
     
   }
   
+
+  
   
   public static DescribePropertiesResponseType describeProperties( final DescribePropertiesType request ) throws EucalyptusCloudException {
+    if ( !Contexts.lookup( ).hasAdministrativePrivileges( ) ) {
+      throw new EucalyptusCloudException( "You are not authorized to interact with this service." );
+    }
     DescribePropertiesResponseType reply = request.getReply( );
     List<Property> props = reply.getProperties( );
     final Predicate<ConfigurableProperty> filter = new Predicate<ConfigurableProperty>( ) {
@@ -142,11 +147,11 @@ public class PropertiesManager {
   }
   private static final String INTERNAL_OP = "euca";
   public static ModifyPropertyValueResponseType modifyProperty( ModifyPropertyValueType request ) throws EucalyptusCloudException {
+    if ( !Contexts.lookup( ).hasAdministrativePrivileges( ) ) {
+      throw new EucalyptusCloudException( "You are not authorized to interact with this service." );
+    }
     ModifyPropertyValueResponseType reply = request.getReply( );
     if( INTERNAL_OP.equals( request.getName( ) ) ) {
-      if ( !Contexts.lookup( ).hasAdministrativePrivileges( ) ) {
-        throw new EucalyptusCloudException( "You are not authorized to interact with this service." );
-      }
       LOG.debug( "Performing euca operation: \n" + request.getValue( ) );
       try {
         reply.setName( INTERNAL_OP );
@@ -169,26 +174,24 @@ public class PropertiesManager {
         Boolean reset = request.getReset( );
         if (reset != null) {
           if (Boolean.TRUE.equals( reset )) {
-            entry.setValue(entry.getDefaultValue());
+        	entry.setValue(entry.getDefaultValue());	
           }
         } else { 
-          try {
-            String inValue = request.getValue( );
-            entry.setValue( ( inValue == null ) ? "" : inValue );
-          } catch ( Exception e ) {
-            entry.setValue( oldValue );
-            Exceptions.findAndRethrow( e, EucalyptusCloudException.class );
-            throw e;
-          }
+        try {
+          String inValue = request.getValue( );
+          entry.setValue( ( inValue == null ) ? "" : inValue );
+        } catch ( Exception e ) {
+          entry.setValue( oldValue );
+        }
         }
         reply.setValue( entry.getValue( ) );
         reply.setName( request.getName( ) );
       } catch ( IllegalAccessException e ) {
         throw new EucalyptusCloudException( "Failed to set property: " + e.getMessage( ) );
-      } catch (EucalyptusCloudException e) {
-        throw e;
+      } catch (Exception e) {
+    	  throw new EucalyptusCloudException(e);
       } catch (Throwable e) {
-        throw new EucalyptusCloudException(e);
+    	  throw new EucalyptusCloudException(e);
       }
     }
     return reply;

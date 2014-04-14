@@ -1,5 +1,5 @@
 /*************************************************************************
- * Copyright 2009-2014 Eucalyptus Systems, Inc.
+ * Copyright 2009-2012 Eucalyptus Systems, Inc.
  *
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -75,18 +75,21 @@ import javax.persistence.EntityTransaction;
 import org.apache.log4j.Logger;
 import org.hibernate.criterion.Example;
 import com.eucalyptus.auth.principal.UserFullName;
+import com.eucalyptus.blockstorage.Storage;
 import com.eucalyptus.blockstorage.msgs.CreateStorageVolumeResponseType;
 import com.eucalyptus.blockstorage.msgs.CreateStorageVolumeType;
 import com.eucalyptus.blockstorage.msgs.DescribeStorageVolumesResponseType;
 import com.eucalyptus.blockstorage.msgs.DescribeStorageVolumesType;
 import com.eucalyptus.blockstorage.msgs.StorageVolume;
-import com.eucalyptus.compute.common.CloudMetadata.VolumeMetadata;
+import com.eucalyptus.bootstrap.Hosts;
+import com.eucalyptus.cloud.CloudMetadata.VolumeMetadata;
 import com.eucalyptus.component.Partitions;
 import com.eucalyptus.component.ServiceConfiguration;
 import com.eucalyptus.component.Topology;
 import com.eucalyptus.component.id.Eucalyptus;
-import com.eucalyptus.compute.identifier.ResourceIdentifiers;
+import com.eucalyptus.crypto.Crypto;
 import com.eucalyptus.entities.Entities;
+import com.eucalyptus.entities.EntityWrapper;
 import com.eucalyptus.entities.TransactionException;
 import com.eucalyptus.entities.Transactions;
 import com.eucalyptus.event.ClockTick;
@@ -116,8 +119,8 @@ import com.google.common.collect.Multimap;
 import edu.ucsb.eucalyptus.msgs.BaseMessage;
 
 public class Volumes {
-  public  static String     ID_PREFIX             = "vol";
   private static Logger     LOG                   = Logger.getLogger( Volumes.class );
+  private static String     ID_PREFIX             = "vol";
   private static final long VOLUME_STATE_TIMEOUT  = 2 * 60 * 60 * 1000L;
   private static final long VOLUME_DELETE_TIMEOUT = 30 * 60 * 1000L;
   
@@ -373,21 +376,20 @@ public class Volumes {
   
   public static Volume lookup( final OwnerFullName ownerFullName, final String volumeId ) {
     final EntityTransaction db = Entities.get( Volume.class );
+    Volume volume = null;
     try {
-      Volume volume = Entities.uniqueResult( Volume.named( ownerFullName, volumeId ) );
+      volume = Entities.uniqueResult( Volume.named( ownerFullName, volumeId ) );
       db.commit( );
-      return volume;
-    } catch ( final NoSuchElementException e ) {
-      throw e;
     } catch ( final Exception ex ) {
       LOG.debug( ex, ex );
       db.rollback( );
       throw Exceptions.toUndeclared( ex );
     }
+    return volume;
   }
   
   public static Volume createStorageVolume( final ServiceConfiguration sc, final UserFullName owner, final String snapId, final Integer newSize, final BaseMessage request ) throws ExecutionException {
-    final String newId = ResourceIdentifiers.generateString( ID_PREFIX );
+    final String newId = Crypto.generateId( owner.getUniqueId( ), ID_PREFIX );
     LOG.debug("Creating volume");
     final Volume newVol = Transactions.save( Volume.create( sc, owner, snapId, newSize, newId ), new Callback<Volume>( ) {
       
@@ -395,7 +397,7 @@ public class Volumes {
       public void fire( final Volume t ) {
         t.setState( State.GENERATING );
         try {
-          final CreateStorageVolumeType req = new CreateStorageVolumeType( t.getDisplayName( ), t.getSize( ), snapId, null ).regarding( request );
+          final CreateStorageVolumeType req = new CreateStorageVolumeType( t.getDisplayName( ), t.getSize( ), snapId, null ).regardingUserRequest( request );
           final CreateStorageVolumeResponseType ret = AsyncRequests.sendSync( sc, req );
           LOG.debug("Volume created");
 

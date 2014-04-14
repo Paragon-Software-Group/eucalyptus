@@ -66,19 +66,16 @@
 @GroovyAddClassUUID
 package edu.ucsb.eucalyptus.msgs;
 
-public class VmExportMessage extends EucalyptusMessage {
-  @Override
-  public <TYPE extends BaseMessage> TYPE getReply( ) {
-    VmExportResponseMessage reply = (VmExportResponseMessage) super.getReply( );
-    reply.requestId = this.getCorrelationId( );
-    return (TYPE) reply;
-  }
-}
-public class VmExportResponseMessage extends VmExportMessage {
-  protected String requestId;
-}
+import java.math.BigInteger;
+import java.util.ArrayList;
+import com.eucalyptus.binding.HttpParameterMapping;
+import com.eucalyptus.binding.HttpEmbedded;
+
+public class VmExportMessage extends EucalyptusMessage {}
+
 /*********************************************************************************/
-public class CreateInstanceExportTaskResponseType extends VmExportResponseMessage {
+public class CreateInstanceExportTaskResponseType extends VmExportMessage {
+  String requestId;
   ExportTaskResponse exportTask;
   public CreateInstanceExportTaskResponseType() {
   }
@@ -90,14 +87,27 @@ public class CreateInstanceExportTaskType extends VmExportMessage {
   ExportToS3Task exportToS3;
   public CreateInstanceExportTask() {
   }
+  @Override
+  public <TYPE extends BaseMessage> TYPE getReply( ) {
+    TYPE reply = super.getReply( );
+    reply.requestId = this.getCorrelationId( );
+    return reply;
+  }  
 }
 /*********************************************************************************/
 public class CancelExportTaskType extends VmExportMessage {
   String exportTaskId;
   public CancelExportTaskType() {
   }
+  @Override
+  public <TYPE extends BaseMessage> TYPE getReply( ) {
+    TYPE reply = super.getReply( );
+    reply.requestId = this.getCorrelationId( );
+    return reply;
+  }  
 }
-public class CancelExportTaskResponseType extends VmExportResponseMessage {
+public class CancelExportTaskResponseType extends VmExportMessage {
+  String requestId;
   Boolean _return;
   public CancelExportTaskResponseType() {
   }
@@ -107,8 +117,15 @@ public class DescribeExportTasksType extends VmExportMessage {
   ArrayList<String> exportTaskIdSet = new ArrayList<String>();
   public DescribeExportTasksType() {
   }
+  @Override
+  public <TYPE extends BaseMessage> TYPE getReply( ) {
+    TYPE reply = super.getReply( );
+    reply.requestId = this.getCorrelationId( );
+    return reply;
+  }  
 }
-public class DescribeExportTasksResponseType extends VmExportResponseMessage {
+public class DescribeExportTasksResponseType extends VmExportMessage {
+  String requestId;
   ArrayList<ExportTaskResponse> exportTaskSet = new ArrayList<ExportTaskResponse>();
   public DescribeExportTasksResponseType() {
   }

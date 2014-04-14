@@ -1,5 +1,5 @@
 /*************************************************************************
- * Copyright 2009-2014 Eucalyptus Systems, Inc.
+ * Copyright 2009-2012 Eucalyptus Systems, Inc.
  *
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -19,63 +19,33 @@
  ************************************************************************/
 package com.eucalyptus.tokens;
 
-import static org.hamcrest.Matchers.notNullValue;
 import org.jboss.netty.handler.codec.http.HttpResponseStatus;
 import com.eucalyptus.util.EucalyptusCloudException;
-import com.eucalyptus.util.Parameters;
 
 /**
  *
  */
 public class TokensException extends EucalyptusCloudException {
-  private static final long serialVersionUID = 1L;
 
-  enum Code {
-    InvalidAction(),
-    InvalidParameterValue,
-    MissingAuthenticationToken( HttpResponseStatus.FORBIDDEN, "Sender" ),
-    ServiceUnavailable( HttpResponseStatus.SERVICE_UNAVAILABLE, "Receiver" ),
-    ValidationError,
-    ;
+  public static final String NOT_AUTHORIZED = "NotAuthorized";
+  public static final String INVALID_PARAMETER = "InvalidParameterValue";
 
-    private final HttpResponseStatus status;
-    private final String type;
+  private final HttpResponseStatus status;
+  private final String error;
 
-    private Code( ) {
-      this( HttpResponseStatus.BAD_REQUEST, "Sender" );
-    }
-
-    private Code( final HttpResponseStatus status, final String type ) {
-      this.status = status;
-      this.type = type;
-    }
-
-    private HttpResponseStatus getHttpStatus() {
-      return status;
-    }
-
-    private String getType() {
-      return type;
-    }
-  }
-
-  private final Code code;
-
-  public TokensException( final Code code,
+  public TokensException( final HttpResponseStatus status,
+                          final String error,
                           final String message ) {
     super( message );
-    this.code = Parameters.checkParam( "code", code, notNullValue( ) );
+    this.status = status;
+    this.error = error;
   }
 
-  public HttpResponseStatus getStatus( ) {
-    return code.getHttpStatus( );
+  public HttpResponseStatus getStatus() {
+    return status;
   }
 
-  public String getError( ) {
-    return code.name( );
-  }
-
-  public String getType( ) {
-    return code.getType( );
+  public String getError() {
+    return error;
   }
 }

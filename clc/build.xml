@@ -105,13 +105,7 @@
 	<macrodef name="call-module-target">
 		<attribute name="target" />
 		<sequential>
-			<subant target="@{target}" buildpathref="build-module-path">
-				<property name="project.basedir" value="${project.basedir}" />
-				<propertyset>
-					<propertyref prefix="junit."/>
-					<propertyref prefix="module.skip"/>
-				</propertyset>
-			</subant>
+			<subant target="@{target}" buildpathref="build-module-path"/>
 		</sequential>
 	</macrodef>
 	<!--================================== build targets ==================================-->
@@ -125,8 +119,8 @@
 	</target>
 	
 	<target name="build-test">
-		<ant inheritall="false" target="build-test-all" />
-		<ant inheritall="false" target="jar" />
+		<ant dir="." inheritall="false" target="build-test-all" />
+		<ant dir="." inheritall="false" target="jar" />
 	</target>
 	
 	<target name="build-test-all">
@@ -142,35 +136,8 @@
 		<property name="module.skipNativeMake" value="true"/>
 		<call-module-target target="junit"/>
 	</target>
-	<target name="junit-report">
-		<!-- Run tests -->
-		<property name="module.skipNativeMake" value="true"/>
-		<property name="junit.halt" value="off"/>
-		<call-module-target target="junit"/>
 
-		<!-- Generate report -->
-		<mkdir dir="target/reports/junit/html"/>
-		<junitreport todir="target/reports/junit">
-			<fileset dir="modules">
-				<include name="*/build/reports/junit/TEST-*.xml"/>
-			</fileset>
-			<report format="frames" todir="target/reports/junit/html"/>
-		</junitreport>
-		<zip destfile="target/reports/junit.zip" basedir="target/reports/junit" />
-
-		<!-- Fail build on test failures -->
-		<pathconvert targetos="unix" property="junit.failure.path">
-			<fileset dir="${project.basedir}/modules" includes="*/build/reports/junit/failure"/>
- 		</pathconvert>
-		<condition property="junit.failure">
-			<not>
-				<length string="${junit.failure.path}" length="0" />
-			</not>
-		</condition>
-		<fail if="junit.failure" message="JUnit test failure"/>	
-	</target>
-
-	<!--================================== clean targets ==================================-->
+    <!--================================== clean targets ==================================-->
 	<target name="indent">
 		<call-module-target target="indent"/>
 	</target>
@@ -202,8 +169,6 @@
 				<exclude name="**/gwt-user-*.jar*" />
 				<exclude name="**/gwt-servlet-deps-*.jar*" />
 				<exclude name="**/validation-api*.jar*" />
-				<exclude name="**/derby-*.jar*" />
-				<exclude name="**/jmock-*.jar*" />
 				<exclude name="**/.git/" />
 			</fileset>
 		</copy>

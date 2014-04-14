@@ -569,16 +569,14 @@ public class LdapSync {
   private static void removeObsoleteAccounts( Set<String> oldAccountSet ) {
     // We don't want to remove system account
     oldAccountSet.remove( Account.SYSTEM_ACCOUNT );
-
+    
     LOG.debug( "Removing obsolete accounts: " + oldAccountSet );
-    for ( final String account : oldAccountSet ) {
+    for ( String account : oldAccountSet ) {
       try {
         Accounts.deleteAccount( account, false /* forceDeleteSystem */, true /* recursive */ );
-      } catch ( final AuthException e ) {
-        if ( !AuthException.DELETE_SYSTEM_ACCOUNT.equals( e.getMessage( ) ) ) {
-          LOG.error( e, e );
-          LOG.warn( "Failed to delete account " + account, e );
-        }
+      } catch ( AuthException e ) {
+        LOG.error( e, e );
+        LOG.warn( "Failed to delete account " + account, e );
       }
     }
   }

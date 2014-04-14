@@ -1,5 +1,5 @@
 /*************************************************************************
- * Copyright 2009-2013 Eucalyptus Systems, Inc.
+ * Copyright 2009-2012 Eucalyptus Systems, Inc.
  *
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -101,11 +101,6 @@ import com.google.common.base.Joiner;
 import com.google.common.collect.Lists;
 import com.google.common.collect.Sets;
 
-
-/**
- * @deprecated
- */
-@Deprecated
 public class EntityWrapper<TYPE> {
   private static Logger    LOG = Logger.getLogger( EntityWrapper.class );
   private TransactionState tx;
@@ -175,14 +170,9 @@ public class EntityWrapper<TYPE> {
     this.tx = new TransactionState( persistenceContext );
     this.txStart = Threads.currentStackString( );
   }
-
+  
   @SuppressWarnings( { "unchecked", "cast" } )
   public <T> List<T> query( final T example ) {
-    return query( example, false );
-  }
-
-  @SuppressWarnings( { "unchecked", "cast" } )
-  public <T> List<T> query( final T example, final boolean readOnly ) {
     final Example qbe = Example.create( example ).enableLike( MatchMode.EXACT );
     final List<T> resultList = this.getSession( )
                                    .createCriteria( example.getClass( ) )
@@ -190,7 +180,6 @@ public class EntityWrapper<TYPE> {
                                    .setResultTransformer( Criteria.DISTINCT_ROOT_ENTITY )
                                    .setCacheable( true )
                                    .add( qbe )
-                                   .setReadOnly( readOnly )
                                    .list( );
     return Lists.newArrayList( Sets.newHashSet( resultList ) );
   }
@@ -398,6 +387,16 @@ public class EntityWrapper<TYPE> {
   @Deprecated
   public <T> T add( final T newObject ) {
     return this.persist( newObject );
+  }
+  
+  /**
+   * TODO: not use this please.
+   * 
+   * @param string
+   * @return
+   */
+  public Query createQuery( final String string ) {
+    return this.getSession( ).createQuery( string );
   }
   
   /**

@@ -76,7 +76,6 @@ import com.eucalyptus.storage.common.CallBack;
 import com.eucalyptus.util.EucalyptusCloudException;
 
 
-@Deprecated
 public class HttpWriter extends HttpTransfer {
 	private static Logger LOG = Logger.getLogger(HttpWriter.class);
 

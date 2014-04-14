@@ -1,5 +1,5 @@
 /*************************************************************************
- * Copyright 2009-2013 Eucalyptus Systems, Inc.
+ * Copyright 2009-2012 Eucalyptus Systems, Inc.
  *
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -62,19 +62,17 @@
 
 package com.eucalyptus.blockstorage;
 
-import static com.eucalyptus.compute.common.ImageMetadata.State.available;
-import static com.eucalyptus.compute.common.ImageMetadata.State.pending;
+import static com.eucalyptus.cloud.ImageMetadata.State.available;
+import static com.eucalyptus.cloud.ImageMetadata.State.pending;
 import static com.eucalyptus.images.Images.inState;
 
 import java.util.EnumSet;
 import java.util.List;
 import java.util.Map;
 import java.util.NoSuchElementException;
-import java.util.Set;
 import java.util.concurrent.Callable;
 import java.util.concurrent.ExecutionException;
 
-import javax.annotation.Nullable;
 import javax.persistence.EntityTransaction;
 import javax.persistence.PersistenceException;
 
@@ -82,18 +80,16 @@ import org.apache.log4j.Logger;
 
 import com.eucalyptus.auth.AuthException;
 import com.eucalyptus.auth.principal.AccountFullName;
+import com.eucalyptus.blockstorage.Storage;
 import com.eucalyptus.blockstorage.msgs.DeleteStorageSnapshotResponseType;
 import com.eucalyptus.blockstorage.msgs.DeleteStorageSnapshotType;
-import com.eucalyptus.compute.common.CloudMetadatas;
+import com.eucalyptus.cloud.CloudMetadatas;
 import com.eucalyptus.cloud.util.DuplicateMetadataException;
 import com.eucalyptus.component.NoSuchComponentException;
 import com.eucalyptus.component.Partitions;
 import com.eucalyptus.component.ServiceConfiguration;
 import com.eucalyptus.component.Topology;
 import com.eucalyptus.component.id.Eucalyptus;
-import com.eucalyptus.compute.ClientComputeException;
-import com.eucalyptus.compute.identifier.InvalidResourceIdentifier;
-import com.eucalyptus.compute.identifier.ResourceIdentifiers;
 import com.eucalyptus.context.Context;
 import com.eucalyptus.context.Contexts;
 import com.eucalyptus.context.IllegalContextAccessException;
@@ -116,13 +112,10 @@ import com.eucalyptus.util.EucalyptusCloudException;
 import com.eucalyptus.util.Exceptions;
 import com.eucalyptus.util.RestrictedTypes;
 import com.eucalyptus.util.async.AsyncRequests;
-import com.eucalyptus.vm.VmInstance;
 import com.google.common.base.Predicate;
 import com.google.common.base.Predicates;
-import com.google.common.base.Strings;
 import com.google.common.base.Supplier;
 import com.google.common.collect.Iterables;
-import com.google.common.collect.Sets;
 
 import edu.ucsb.eucalyptus.msgs.CreateSnapshotResponseType;
 import edu.ucsb.eucalyptus.msgs.CreateSnapshotType;
@@ -145,8 +138,7 @@ public class SnapshotManager {
   
   public CreateSnapshotResponseType create( final CreateSnapshotType request ) throws EucalyptusCloudException, NoSuchComponentException, DuplicateMetadataException, AuthException, IllegalContextAccessException, NoSuchElementException, PersistenceException, TransactionException {
     final Context ctx = Contexts.lookup( );
-    final String volumeId = normalizeVolumeIdentifier( request.getVolumeId( ) );
-    Volume vol = Transactions.find( Volume.named( ctx.getUserFullName( ).asAccountFullName( ), volumeId ) );
+    Volume vol = Transactions.find( Volume.named( ctx.getUserFullName( ).asAccountFullName( ), request.getVolumeId( ) ) );
     final ServiceConfiguration sc = Topology.lookup( Storage.class, Partitions.lookupByName( vol.getPartition( ) ) );
     final Volume volReady = Volumes.checkVolumeReady( vol );
     Supplier<Snapshot> allocator = new Supplier<Snapshot>( ) {
@@ -195,7 +187,6 @@ public class SnapshotManager {
   public DeleteSnapshotResponseType delete( final DeleteSnapshotType request ) throws EucalyptusCloudException {
     final DeleteSnapshotResponseType reply = ( DeleteSnapshotResponseType ) request.getReply( );
     final Context ctx = Contexts.lookup( );
-    final String snapshotId = normalizeSnapshotIdentifier( request.getSnapshotId( ) );
     Predicate<Snapshot> deleteSnapshot = new Predicate<Snapshot>( ) {
       
       @Override
@@ -203,9 +194,10 @@ public class SnapshotManager {
         if ( !State.EXTANT.equals( snap.getState( ) ) && !State.FAIL.equals( snap.getState( ) ) ) {
           return false;
         } else if ( !RestrictedTypes.filterPrivileged( ).apply( snap ) ) {
-          throw Exceptions.toUndeclared( new EucalyptusCloudException( "Not authorized to delete snapshot " + request.getSnapshotId( ) + " by " + ctx.getUser( ).getName( ) ) );
-        } else if ( isReservedSnapshot( snapshotId ) ) {
-          throw Exceptions.toUndeclared( new EucalyptusCloudException( "Snapshot " + request.getSnapshotId( ) + " is in use, deletion not permitted" ) );
+          throw Exceptions.toUndeclared( "Not authorized to delete snapshot " + request.getSnapshotId( ) + " by " + ctx.getUser( ).getName( ),
+                                         new EucalyptusCloudException( ) );
+        } else if ( isReservedSnapshot( request.getSnapshotId( ) ) ) {
+          throw Exceptions.toUndeclared( "Snapshot " + request.getSnapshotId( ) + " is in use, deletion not permitted", new EucalyptusCloudException( ) );
         } else {
           fireUsageEvent(snap, SnapShotEvent.forSnapShotDelete());
           
@@ -236,7 +228,7 @@ public class SnapshotManager {
               };
               Threads.enqueue( Eucalyptus.class, Snapshots.class, deleteBroadcast );
             } else {
-              throw Exceptions.toUndeclared( new EucalyptusCloudException( "Unable to delete snapshot: " + snap ) );
+              throw Exceptions.toUndeclared( "Unable to delete snapshot: " + snap, new EucalyptusCloudException( ) );
             }
           } catch ( Exception ex1 ) {
             throw Exceptions.toUndeclared( ex1.getMessage( ), ex1 );
@@ -247,10 +239,10 @@ public class SnapshotManager {
     };
     boolean result = false;
     try {
-      result = Transactions.delete( Snapshot.named( ctx.getUserFullName( ).asAccountFullName( ), snapshotId ), deleteSnapshot);
+      result = Transactions.delete( Snapshot.named( ctx.getUserFullName( ).asAccountFullName( ), request.getSnapshotId( ) ), deleteSnapshot);
     } catch ( NoSuchElementException ex2 ) {
       try {
-        result = Transactions.delete( Snapshot.named( null, snapshotId ), deleteSnapshot );
+        result = Transactions.delete( Snapshot.named( null, request.getSnapshotId( ) ), deleteSnapshot);
       } catch ( ExecutionException ex3 ) {
         throw new EucalyptusCloudException( ex3.getCause( ) );
       } catch ( NoSuchElementException ex4 ) {
@@ -267,8 +259,7 @@ public class SnapshotManager {
     if(!request.getRestorableBySet().isEmpty()) { return reply; } //TODO:KEN EUCA-5759 Need to implement RestorableBy, for now ignore
     final Context ctx = Contexts.lookup( );
     final boolean showAll = request.getSnapshotSet( ).remove( "verbose" );
-    final Set<String> snapshotIds = Sets.newHashSet( normalizeSnapshotIdentifiers( request.getSnapshotSet() ) );
-    final AccountFullName ownerFullName = ( ctx.isAdministrator( ) && showAll ) ?
+    final AccountFullName ownerFullName = ( ctx.hasAdministrativePrivileges( ) && showAll ) ?
         null :
         AccountFullName.getInstance( ctx.getAccount( ) );
     final Filter filter = Filters.generate( request.getFilterSet(), Snapshot.class );
@@ -277,7 +268,7 @@ public class SnapshotManager {
       final List<Snapshot> unfilteredSnapshots =
           Entities.query( Snapshot.named( ownerFullName, null ), true, filter.asCriterion(), filter.getAliases() );
       final Predicate<? super Snapshot> requestedAndAccessible = CloudMetadatas.filteringFor(Snapshot.class)
-          .byId( snapshotIds )
+          .byId( request.getSnapshotSet() )
           .byPredicate( filter.asPredicate() )
           .byPrivileges()
           .buildPredicate();
@@ -323,39 +314,6 @@ public class SnapshotManager {
 	// Fix for EUCA-4932. Any snapshot associated with an (available or pending) image as a root/non-root device is a reserved snapshot
 	// and can't be deleted without first unregistering the image
     return Predicates.or( SnapshotInUseVerifier.INSTANCE ).apply( snapshotId );
-  }
-
-  private static String normalizeIdentifier( final String identifier,
-                                             final String prefix,
-                                             final boolean required,
-                                             final String message ) throws ClientComputeException {
-    try {
-      return Strings.emptyToNull( identifier ) == null && !required ?
-          null :
-          ResourceIdentifiers.parse( prefix, identifier ).getIdentifier( );
-    } catch ( final InvalidResourceIdentifier e ) {
-      throw new ClientComputeException( "InvalidParameterValue", String.format( message, e.getIdentifier( ) ) );
-    }
-  }
-
-  private static String normalizeSnapshotIdentifier( final String identifier ) throws EucalyptusCloudException {
-    return normalizeIdentifier(
-        identifier, ID_PREFIX, true, "Value (%s) for parameter snapshotId is invalid. Expected: 'snap-...'." );
-  }
-
-  private static String normalizeVolumeIdentifier( final String identifier ) throws EucalyptusCloudException {
-    return normalizeIdentifier(
-        identifier, Volumes.ID_PREFIX, true, "Value (%s) for parameter volume is invalid. Expected: 'vol-...'." );
-  }
-
-  private static List<String> normalizeSnapshotIdentifiers( final List<String> identifiers ) throws EucalyptusCloudException {
-    try {
-      return ResourceIdentifiers.normalize( ID_PREFIX, identifiers );
-    } catch ( final InvalidResourceIdentifier e ) {
-      throw new ClientComputeException(
-          "InvalidParameterValue",
-          "Value ("+e.getIdentifier()+") for parameter snapshots is invalid. Expected: 'snap-...'." );
-    }
   }
 
   private enum ImageSnapshotReservation implements Predicate<String> {

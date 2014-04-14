@@ -82,8 +82,4 @@ public class EuareQuotaUtil {
   public static long countInstanceProfileByAccount( String accountId ) throws AuthException {
     return Accounts.lookupAccountById( accountId ).getInstanceProfiles( ).size( );
   }
-
-  public static long countServerCertificatesByAccount( String accountId ) throws AuthException {
-    return Accounts.lookupAccountById( accountId ).listServerCertificates( "/" ).size( );
-  }
 }

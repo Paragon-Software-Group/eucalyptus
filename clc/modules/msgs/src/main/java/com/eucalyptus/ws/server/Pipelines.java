@@ -1,5 +1,5 @@
 /*************************************************************************
- * Copyright 2009-2013 Eucalyptus Systems, Inc.
+ * Copyright 2009-2012 Eucalyptus Systems, Inc.
  *
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -62,9 +62,7 @@
 
 package com.eucalyptus.ws.server;
 
-import static com.eucalyptus.auth.principal.TemporaryAccessKey.TemporaryKeyType;
 import java.lang.reflect.Modifier;
-import java.util.EnumSet;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.Set;
@@ -354,7 +352,7 @@ public class Pipelines {
     
     @Override
     public ChannelPipeline addHandlers( final ChannelPipeline pipeline ) {
-      pipeline.addLast( "hmac-v2-verify",  new HmacHandler( EnumSet.of(TemporaryKeyType.Role) ) );
+      pipeline.addLast( "hmac-v2-verify",  new HmacHandler( true ) );
       pipeline.addLast( "timestamp-verify", Handlers.queryTimestamphandler() );
       pipeline.addLast( "restful-binding", new InternalQueryBinding( ) );
       return pipeline;

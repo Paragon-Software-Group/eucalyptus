@@ -1,5 +1,5 @@
 /*************************************************************************
- * Copyright 2009-2014 Eucalyptus Systems, Inc.
+ * Copyright 2009-2013 Eucalyptus Systems, Inc.
  * 
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -64,13 +64,16 @@
 
 package com.eucalyptus.compute.conversion;
 
-import com.eucalyptus.compute.ClientComputeException;
+import com.eucalyptus.compute.ComputeServiceException;
+import com.eucalyptus.util.EucalyptusCloudException;
+import com.eucalyptus.ws.Role;
+import com.eucalyptus.ws.protocol.QueryBindingInfo;
 
-public class ImageManifestException extends ClientComputeException {
-  private static final long serialVersionUID = 1L;
-
+@QueryBindingInfo( statusCode = 400 )
+public class ImageManifestException extends ComputeServiceException {
+  
   public ImageManifestException( String message ) {
-    super( "InvalidManifest", message );
+    super( "InvalidManifest", Role.Sender, message );
   }
   
 }

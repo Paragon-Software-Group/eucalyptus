@@ -143,13 +143,11 @@
     <collection field="networkNames" factory="org.jibx.runtime.Utility.arrayListFactory">
       <value name="netNames" type="java.lang.String" />
     </collection>
-    <value name="macAddresses" constant=""/> <!-- TODO remove -->
-    <value name="networkIndexList" field="networkIndex" usage="optional"/>
-    <value name="privateIps" field="privateAddress" usage="optional"/>
+    <value name="macAddresses" field="macAddress" />
+    <value name="networkIndexList" field="networkIndex" />
     <value name="uuids" field="uuid" />
     <value name="vlan" field="vlan" usage="required" />
     <value name="userData" field="userData" usage="required" />
-    <value name="credential" field="credential" usage="optional" />
     <value name="launchIndex" field="launchIndex" usage="required" />
     <value name="platform" field="platform" usage="required" />
     <value name="ownerId" field="ownerId" />
@@ -185,7 +183,7 @@
       <value name="instanceIds" type="java.lang.String" />
     </collection>
   </mapping>
-  <mapping name="TerminateInstancesResponse" class="edu.ucsb.eucalyptus.msgs.TerminateInstancesClusterResponseType"
+  <mapping name="TerminateInstancesResponse" class="edu.ucsb.eucalyptus.msgs.TerminateInstancesResponseType"
     extends="edu.ucsb.eucalyptus.msgs.EucalyptusMessage">
     <structure map-as="edu.ucsb.eucalyptus.msgs.EucalyptusMessage" />
     <value name="isTerminated" field="terminated" type="boolean" />
@@ -223,7 +221,7 @@
     <value name="instanceId" field="instanceId" usage="required" />
     <value name="bucketName" field="bucket" usage="required" />
     <value name="filePrefix" field="prefix" usage="required" />
-    <value name="objectStorageURL" field="url" usage="required" />
+    <value name="walrusURL" field="url" usage="required" />
     <value name="userPublicKey" field="awsAccessKeyId" usage="required" />
     <value name="S3Policy" field="uploadPolicy" usage="required" />
     <value name="S3PolicySig" field="uploadPolicySignature" usage="required" />

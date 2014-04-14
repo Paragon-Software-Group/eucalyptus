@@ -1,22 +1,3 @@
-/*************************************************************************
- * Copyright 2009-2014 Eucalyptus Systems, Inc.
- *
- * This program is free software: you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; version 3 of the License.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program.  If not, see http://www.gnu.org/licenses/.
- *
- * Please contact Eucalyptus Systems, Inc., 6755 Hollister Ave., Goleta
- * CA 93117, USA or visit http://www.eucalyptus.com/licenses/ if you need
- * additional information or have any questions.
- ************************************************************************/
 package com.eucalyptus.cluster.callback;
 
 import java.util.ArrayList;
@@ -38,16 +19,17 @@ import org.apache.log4j.Logger;
 import com.eucalyptus.auth.Accounts;
 import com.eucalyptus.auth.principal.Account;
 import com.eucalyptus.auth.principal.User;
-import com.eucalyptus.cloudwatch.common.CloudWatch;
-import com.eucalyptus.cloudwatch.common.msgs.Dimension;
-import com.eucalyptus.cloudwatch.common.msgs.Dimensions;
-import com.eucalyptus.cloudwatch.common.msgs.MetricData;
-import com.eucalyptus.cloudwatch.common.msgs.MetricDatum;
-import com.eucalyptus.cloudwatch.common.msgs.PutMetricDataResponseType;
-import com.eucalyptus.cloudwatch.common.msgs.PutMetricDataType;
+import com.eucalyptus.cloudwatch.CloudWatch;
+import com.eucalyptus.cloudwatch.Dimension;
+import com.eucalyptus.cloudwatch.Dimensions;
+import com.eucalyptus.cloudwatch.MetricData;
+import com.eucalyptus.cloudwatch.MetricDatum;
+import com.eucalyptus.cloudwatch.PutMetricDataResponseType;
+import com.eucalyptus.cloudwatch.PutMetricDataType;
 import com.eucalyptus.cluster.callback.DescribeSensorCallback.GetTimestamp;
+import com.eucalyptus.component.ComponentIds;
 import com.eucalyptus.component.ServiceConfiguration;
-import com.eucalyptus.component.Topology;
+import com.eucalyptus.component.ServiceConfigurations;
 import com.eucalyptus.entities.Transactions;
 import com.eucalyptus.reporting.event.InstanceUsageEvent;
 import com.eucalyptus.util.EucalyptusCloudException;
@@ -402,7 +384,7 @@ public class CloudWatchHelper {
   }
 
   public static ServiceConfiguration createServiceConfiguration() {
-    return Topology.lookup( CloudWatch.class );
+    return ServiceConfigurations.createEphemeral(ComponentIds.lookup(CloudWatch.class));
   }
 
   public void sendSystemMetric(PutMetricDataType putMetricData) throws Exception {
@@ -767,8 +749,7 @@ public class CloudWatchHelper {
       
       metricData.setMember(Lists.newArrayList(metricDatum));
       putMetricData.setMetricData(metricData);
-      putMetricData.setUserId(instanceInfoProvider.getEffectiveUserId(event.getInstanceId()));
-      putMetricData.markPrivileged();
+      putMetricData.setEffectiveUserId(instanceInfoProvider.getEffectiveUserId(event.getInstanceId()));
       putMetricDataList.add(putMetricData);
     }
   }

@@ -1,6 +1,6 @@
 #!/usr/bin/python
 
-# Copyright 2011-2014 Eucalyptus Systems, Inc.
+# Copyright 2011-2012 Eucalyptus Systems, Inc.
 #
 # Redistribution and use of this software in source and binary forms,
 # with or without modification, are permitted provided that the following
@@ -25,7 +25,6 @@
 # (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 # OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-import tempfile
 import optparse
 import inspect
 import os
@@ -74,11 +73,11 @@ RegOptions = {
 
 # list of services which can be checked
 CheckableServices = ['common', 'cc', 'cloud', 'nc', 'sc',
-                     'walrusbackend', 'vmware', 'vmwarebroker', 'osg']
+                     'walrus', 'vmware', 'vmwarebroker']
 CheckableServicesString = '|'.join(CheckableServices)
 
 # list of services which can be enabled/disabled
-EnableableServices = ['cloud', 'walrusbackend', 'sc', 'vmwarebroker', 'osg']
+EnableableServices = ['cloud', 'walrus', 'sc', 'vmwarebroker']
 EnableableServicesString = '|'.join(EnableableServices)
 
 # config entries that must be updated when registering a broker
@@ -206,17 +205,17 @@ class EucaConf(object):
                                callback_kwargs={'needs' : ['partition_name',
                                                            'component_name']},
                                help='Remove cluster from EUCALYPTUS.')
-        self.parser.add_option('--register-walrusbackend',
+        self.parser.add_option('--register-walrus',
                                action='callback', callback=self.reg_callback,
                                callback_kwargs={'needs' : ['partition_name',
                                                            'component_name',
                                                            'host_name']},
-                               help='Add new walrus backend to EUCALYPTUS.')
-        self.parser.add_option('--deregister-walrusbackend',
+                               help='Add new walrus to EUCALYPTUS.')
+        self.parser.add_option('--deregister-walrus',
                                action='callback', callback=self.reg_callback,
                                callback_kwargs={'needs' : ['partition_name',
                                                            'component_name']},
-                               help='Remove walrus backend from EUCALYPTUS.')
+                               help='Remove walrus from EUCALYPTUS.')
         self.parser.add_option('--register-sc',
                                action='callback',  callback=self.reg_callback,
                                callback_kwargs={'needs' : ['partition_name',
@@ -241,29 +240,9 @@ class EucaConf(object):
                                                            'component_name']},
                                metavar='<partition> <host>',
                                help='Remove vmwarebroker from EUCALYPTUS.')
-        self.parser.add_option('--register-osg',
-                               action='callback', callback=self.reg_callback,
-                               callback_kwargs={'needs' : ['partition_name',
-                                                           'component_name',
-                                                           'host_name']},
-                               help='Add new object storage gateway to EUCALYPTUS.')
-        self.parser.add_option('--deregister-osg',
-                               action='callback', callback=self.reg_callback,
-                               callback_kwargs={'needs' : ['partition_name',
-                                                           'component_name']},
-                               help='Remove object storage gateway from EUCALYPTUS.')
-        self.add_front_end_service_registration_options( 'autoscaling' )
-        self.add_front_end_service_registration_options( 'cloudwatch' )
-        self.add_front_end_service_registration_options( 'compute' )
-        self.add_front_end_service_registration_options( 'euare' )
-        self.add_front_end_service_registration_options( 'loadbalancing' )
-        self.add_front_end_service_registration_options( 'tokens' )
-        self.parser.add_option('--register-user-services', action='store_true',
-                               dest='register_user_services', default=False,
-                               help='Add user services to EUCALYPTUS')
-        self.parser.add_option('--list-walrusbackends', action='store_true',
-                               dest='list_walrusbackends', default=False,
-                               help='List registered walrusbackend(s).')
+        self.parser.add_option('--list-walruses', action='store_true',
+                               dest='list_walruses', default=False,
+                               help='List registered walrus(es).')
         self.parser.add_option('--list-clouds', action='store_true',
                                dest='list_clouds', default=False,
                                help='List registered CLCs.')
@@ -276,15 +255,6 @@ class EucaConf(object):
         self.parser.add_option('--list-vmwarebrokers', action='store_true',
                                dest='list_vmwarebrokers', default=False,
                                help='List registered VMware brokers.')
-        self.parser.add_option('--list-osgs', action='store_true',
-                               dest='list_osgs', default=False,
-                               help='List registered object storage gateway(s).')
-        self.add_front_end_service_list_option( 'autoscaling' )
-        self.add_front_end_service_list_option( 'cloudwatch' )
-        self.add_front_end_service_list_option( 'compute' )
-        self.add_front_end_service_list_option( 'euare' )
-        self.add_front_end_service_list_option( 'loadbalancing' )
-        self.add_front_end_service_list_option( 'tokens' )
         self.parser.add_option('--list-nodes', action='store_true',
                               dest='list_nodes', default=False,
                               help='List registered NCs.')
@@ -313,14 +283,10 @@ class EucaConf(object):
                                metavar='<port>', callback=self.option_callback,
                                callback_kwargs={'optname' : 'SC_PORT'},
                                help='Set SC port.', default=8773)
-        self.parser.add_option('--walrusbackend-port', action='callback', type='int',
+        self.parser.add_option('--walrus-port', action='callback', type='int',
                                metavar='<port>', callback=self.option_callback,
                                callback_kwargs={'optname' : 'WALRUS_PORT'},
                                help='Set Walrus port.', default=8773)
-        self.parser.add_option('--osg-port', action='callback', type='int',
-                                       metavar='<port>', callback=self.option_callback,
-                                       callback_kwargs={'optname' : 'OSG_PORT'},
-                                       help='Set Object Storage Gateway port.', default=8773)
         self.parser.add_option('--nc-port', action='callback', type='int',
                                metavar='<port>', callback=self.option_callback,
                                callback_kwargs={'optname' : 'NC_PORT'},
@@ -410,13 +376,6 @@ class EucaConf(object):
                                metavar='<component name>',
                                help='Name of the component.\
                                      Used with --register-* & --deregister-*.')
-        self.parser.add_option('-S',
-                               '--component-suffix',
-                               action='store', type='string',
-                               dest='component_suffix',
-                               metavar='<component suffix>',
-                               help='Component name suffix.\
-                                     Used with --register-user-services.')
         self.parser.add_option('--help-register', action='store_true',
                                default=False,
                                help='Display help on register/deregister.')
@@ -440,22 +399,6 @@ class EucaConf(object):
 
     def warn(self, msg):
         print >> sys.stderr, 'warning:', msg
-
-    def add_front_end_service_registration_options(self, service):
-        self.parser.add_option('--register-%s' % service,
-                               action='callback', callback=self.reg_callback,
-                               callback_kwargs={'needs' : ['component_name',
-                                                           'host_name']},
-                               help='Add new %s service to EUCALYPTUS.' % service)
-        self.parser.add_option('--deregister-%s' % service,
-                               action='callback', callback=self.reg_callback,
-                               callback_kwargs={'needs' : ['component_name']},
-                               help='Remove %s service from EUCALYPTUS.' % service)
-
-    def add_front_end_service_list_option(self, service):
-        self.parser.add_option('--list-%s' % service, action='store_true',
-                               dest='list_%s' % service , default=False,
-                               help='List registered %s services.' % service)
 
     def get_sshkey(self):
         key = None
@@ -552,9 +495,7 @@ class EucaConf(object):
         else:
             if action == 'register' and 'component_name' in needs:
                 needs.remove('component_name')
-            if res_type == 'walrusbackend' and 'partition_name' in needs:
-                needs.remove('partition_name')
-            if res_type == 'osg' and 'partition_name' in needs:
+            if res_type == 'walrus' and 'partition_name' in needs:
                 needs.remove('partition_name')
             if len(parser.rargs) < len(needs):
                 parser.error('incomplete args to %s' % opt_str)
@@ -567,48 +508,10 @@ class EucaConf(object):
                 setattr(parser.values, 'component_name',
                         '%s-%s' % (res_type, getattr(parser.values,
                                                      'host_name')))
-            if res_type == 'walrusbackend':
-                setattr(parser.values, 'partition_name', 'walrusbackend')
-            if res_type == 'osg':
-                setattr(parser.values, 'partition_name', 'osg')
+            if res_type == 'walrus':
+                setattr(parser.values, 'partition_name', 'walrus')
             del parser.rargs[:len(needs)]
         setattr(parser.values, '%s_%s' % (action, res_type), True)
-
-    def do_register_user_services(self):
-        if self.options.register_user_services:
-            suffix = self.options.component_suffix
-            host = self.options.host_name
-            if not (suffix and host):
-                self.parser.error('Requires component-suffix and host')
-            self._sync_keys_if_necessary(['euca.p12'])
-            self.options.component_name = 'AS_%s' % suffix
-            self.options.partition_name = 'autoscaling'
-            self._do_register('eucadmin.registerautoscaling',
-                              'RegisterAutoScaling', None)
-            self.options.component_name = 'CW_%s' % suffix
-            self.options.partition_name = 'cloudwatch'
-            self._do_register('eucadmin.registercloudwatch',
-                              'RegisterCloudWatch', None)
-            self.options.component_name = 'COM_%s' % suffix
-            self.options.partition_name = 'compute'
-            self._do_register('eucadmin.registercompute',
-                              'RegisterCompute', None)
-            self.options.component_name = 'EUA_%s' % suffix
-            self.options.partition_name = 'euare'
-            self._do_register('eucadmin.registereuare',
-                              'RegisterEuare', None)
-            self.options.component_name = 'LB_%s' % suffix
-            self.options.partition_name = 'loadbalancing'
-            self._do_register('eucadmin.registerloadbalancing',
-                              'RegisterLoadBalancing', None)
-            self.options.component_name = 'OSG_%s' % suffix
-            self.options.partition_name = 'objectstorage'
-            self._do_register('eucadmin.registerobjectstoragegateway',
-                              'RegisterObjectStorageGateway', None)
-            self.options.component_name = 'TOK_%s' % suffix
-            self.options.partition_name = 'tokens'
-            self._do_register('eucadmin.registertokens',
-                              'RegisterTokens', None)
 
     def update_config_file(self):
         if self.config:
@@ -705,10 +608,10 @@ class EucaConf(object):
                       'eucadmin.describenodes',
                       'DescribeNodes')
 
-    def do_list_walrusbackends(self):
-        self._do_list('list_walrusbackends',
-                      'eucadmin.describewalrusbackends',
-                      'DescribeWalrusBackends')
+    def do_list_walruses(self):
+        self._do_list('list_walruses',
+                      'eucadmin.describewalruses',
+                      'DescribeWalruses')
 
     def do_list_arbitrators(self):
         self._do_list('list_arbitrators',
@@ -734,41 +637,6 @@ class EucaConf(object):
         self._do_list('list_vmwarebrokers',
                       'eucadmin.describevmwarebrokers',
                       'DescribeVMwareBrokers')
-
-    def do_list_osgs(self):
-        self._do_list('list_osgs',
-                      'eucadmin.describeobjectstoragegateways',
-                      'DescribeObjectStorageGateways')
-
-    def do_list_autoscaling(self):
-        self._do_list('list_autoscaling',
-                      'eucadmin.describeautoscaling',
-                      'DescribeAutoScaling')
-
-    def do_list_cloudwatch(self):
-        self._do_list('list_cloudwatch',
-                      'eucadmin.describecloudwatch',
-                      'DescribeCloudWatch')
-
-    def do_list_compute(self):
-        self._do_list('list_compute',
-                      'eucadmin.describecompute',
-                      'DescribeCompute')
-
-    def do_list_euare(self):
-        self._do_list('list_euare',
-                      'eucadmin.describeeuare',
-                      'DescribeEuare')
-
-    def do_list_loadbalancing(self):
-        self._do_list('list_loadbalancing',
-                      'eucadmin.describeloadbalancing',
-                      'DescribeLoadBalancing')
-
-    def do_list_tokens(self):
-        self._do_list('list_tokens',
-                      'eucadmin.describetokens',
-                      'DescribeTokens')
 
     def do_list_components(self):
         self._do_list('list_components',
@@ -858,110 +726,16 @@ class EucaConf(object):
                              'vtunpass')]
             self._sync_keys_if_necessary(global_keys + cluster_keys)
 
-            # temporary credential propagation hack
-            try:
-                tempd = tempfile.mkdtemp()
-                tempf = os.path.join(tempd, 'creds.zip')
-                tempc = os.path.join(tempd, 'eucarc')
-                cls = boto.utils.find_class('eucadmin.getcredentials',
-                                            'GetCredentials')
-                obj = cls()
-                obj.main(euca_home=self.config['EUCALYPTUS'],
-                         account=self.options.cred_account,
-                         user=self.options.cred_user,
-                         zipfile=tempf)
-                if os.system('unzip ' + tempf + ' -d ' + tempd) != 0:
-                    raise Exception('failed to unzip')
-                ncrc = os.path.join(self.config['EUCALYPTUS'], 'var/lib/eucalyptus/keys/ncrc')
-                if os.system('egrep "^EUCA_KEY_DIR"          ' + tempc + '  >' + ncrc) != 0: raise Exception('failed to grep EUCA_KEY_DIR from ' + tempc + ' to ' + ncrc)
-                if os.system('egrep "^export AWS_ACCESS_KEY" ' + tempc + ' >>' + ncrc) != 0: raise Exception('failed to grep AWS_ACCESS_KEY from ' + tempc + ' to ' + ncrc)
-                if os.system('egrep "^export AWS_SECRET_KEY" ' + tempc + ' >>' + ncrc) != 0: raise Exception('failed to grep AWS_SECRET_KEY from ' + tempc + ' to ' + ncrc)
-                if os.system('rm -rf ' + tempd) != 0:
-                    self.warn('failed to clean up by deleting ' + tempd)
-                if os.system('chown eucalyptus.eucalyptus ' + ncrc) != 0:
-                    raise Exception('failed to chown ncrc to eucalyptus')
-                tmp_keys = ['cloud-pk.pem', 'ncrc']
-                self._sync_keys_if_necessary(tmp_keys)
-                self.warn('************************************************************************************')
-                self.warn('This DEVELOPMENT version of Eucalyptus requires cloud-level credentials on all nodes')
-                self.warn('Such arrangement of credentials is not secure and should NEVER be used in production')
-                self.warn('************************************************************************************')
-            except Exception, err:
-                print Exception, err
-                self.warn('Failed to sync cloud-level credentials with a cluster, downloads from Object Store will fail')
-
-    def do_register_walrusbackend(self):
-        if hasattr(self.options, 'register_walrusbackend'):
-            self._do_register('eucadmin.registerwalrusbackend',
-                              'RegisterWalrusBackend', 'walrusbackend_port')
+    def do_register_walrus(self):
+        if hasattr(self.options, 'register_walrus'):
+            self._do_register('eucadmin.registerwalrus',
+                              'RegisterWalrus', 'walrus_port')
             self._sync_keys_if_necessary(['euca.p12'])
 
     def do_register_sc(self):
         if hasattr(self.options, 'register_sc'):
             self._do_register('eucadmin.registerstoragecontroller',
                               'RegisterStorageController', 'sc_port')
-            self._sync_keys_if_necessary(['euca.p12'])
-
-    def do_register_osg(self):
-        if hasattr(self.options, 'register_osg'):
-            self._do_register('eucadmin.registerobjectstoragegateway',
-                              'RegisterObjectStorageGateway', 'osg_port')
-            self._sync_keys_if_necessary(['euca.p12'])
-            # TODO:STEVE: Remove this registration hack
-            suffix = self.options.host_name.split('.')[-1]
-            self.options.component_name = 'AS_%s' % suffix
-            self._do_register('eucadmin.registerautoscaling',
-                              'RegisterAutoScaling', None)
-            self.options.component_name = 'CW_%s' % suffix
-            self._do_register('eucadmin.registercloudwatch',
-                              'RegisterCloudWatch', None)
-            self.options.component_name = 'COM_%s' % suffix
-            self._do_register('eucadmin.registercompute',
-                              'RegisterCompute', None)
-            self.options.component_name = 'EUA_%s' % suffix
-            self._do_register('eucadmin.registereuare',
-                              'RegisterEuare', None)
-            self.options.component_name = 'LB_%s' % suffix
-            self._do_register('eucadmin.registerloadbalancing',
-                              'RegisterLoadBalancing', None)
-            self.options.component_name = 'TOK_%s' % suffix
-            self._do_register('eucadmin.registertokens',
-                              'RegisterTokens', None)
-
-    def do_register_autoscaling(self):
-        if hasattr(self.options, 'register_autoscaling'):
-            self._do_register('eucadmin.registerautoscaling',
-                              'RegisterAutoScaling', None)
-            self._sync_keys_if_necessary(['euca.p12'])
-
-    def do_register_cloudwatch(self):
-        if hasattr(self.options, 'register_cloudwatch'):
-            self._do_register('eucadmin.registercloudwatch',
-                              'RegisterCloudWatch', None)
-            self._sync_keys_if_necessary(['euca.p12'])
-
-    def do_register_compute(self):
-        if hasattr(self.options, 'register_compute'):
-            self._do_register('eucadmin.registercompute',
-                              'RegisterCompute', None)
-            self._sync_keys_if_necessary(['euca.p12'])
-
-    def do_register_euare(self):
-        if hasattr(self.options, 'register_euare'):
-            self._do_register('eucadmin.registereuare',
-                              'RegisterEuare', None)
-            self._sync_keys_if_necessary(['euca.p12'])
-
-    def do_register_loadbalancing(self):
-        if hasattr(self.options, 'register_loadbalancing'):
-            self._do_register('eucadmin.registerloadbalancing',
-                              'RegisterLoadBalancing', None)
-            self._sync_keys_if_necessary(['euca.p12'])
-
-    def do_register_tokens(self):
-        if hasattr(self.options, 'register_tokens'):
-            self._do_register('eucadmin.registertokens',
-                              'RegisterTokens', None)
             self._sync_keys_if_necessary(['euca.p12'])
 
     def _check_host(self):
@@ -991,20 +765,6 @@ class EucaConf(object):
             self.config.update(ConfigBrokerReg)
 
             self._sync_keys_if_necessary(['euca.p12'])
-
-    def do_register_walrusbackend(self):
-        if hasattr(self.options, 'register_walrusbackend'):
-            self._do_register('eucadmin.registerwalrusbackend',
-                              'RegisterWalrusBackend', 'walrusbackend_port')
-            self._sync_keys_if_necessary(['euca.p12'])
-
-    def do_register_objectstoragegateway(self):
-        if hasattr(self.options, 'register_objectstoragegateway'):
-            self._do_register('eucadmin.registerobjectstoragegateway',
-                              'RegisterObjectStorageGateway', 'objectstoragegateway_port')
-            self._sync_keys_if_necessary(['euca.p12'])
-
-    #Deregistration routines below
 
     def _do_deregister(self, option_name, module_name, class_name):
         if hasattr(self.options, option_name):
@@ -1037,10 +797,10 @@ class EucaConf(object):
                             'eucadmin.deregistercluster',
                             'DeregisterCluster')
 
-    def do_deregister_walrusbackend(self):
-        self._do_deregister('deregister_walrusbackend',
-                            'eucadmin.deregisterwalrusbackend',
-                            'DeregisterWalrusBackend')
+    def do_deregister_walrus(self):
+        self._do_deregister('deregister_walrus',
+                            'eucadmin.deregisterwalrus',
+                            'DeregisterWalrus')
 
     def do_deregister_sc(self):
         self._do_deregister('deregister_sc',
@@ -1055,52 +815,8 @@ class EucaConf(object):
         if hasattr(self.options, 'deregister_vmwarebroker'):
             self.config.update(ConfigBrokerDereg)
 
-    def do_deregister_osg(self):
-        self._do_deregister('deregister_osg',
-                            'eucadmin.deregisterobjectstoragegateway',
-                            'DeregisterObjectStorageGateway')
-
-    def do_deregister_autoscaling(self):
-        self._do_deregister('deregister_autoscaling',
-                            'eucadmin.deregisterautoscaling',
-                            'DeregisterAutoScaling')
-
-    def do_deregister_cloudwatch(self):
-        self._do_deregister('deregister_cloudwatch',
-                            'eucadmin.deregistercloudwatch',
-                            'DeregisterCloudWatch')
-
-    def do_deregister_compute(self):
-        self._do_deregister('deregister_compute',
-                            'eucadmin.deregistercompute',
-                            'DeregisterCompute')
-
-    def do_deregister_euare(self):
-        self._do_deregister('deregister_euare',
-                            'eucadmin.deregistereuare',
-                            'DeregisterEuare')
-
-    def do_deregister_loadbalancing(self):
-        self._do_deregister('deregister_loadbalancing',
-                            'eucadmin.deregisterloadbalancing',
-                            'DeregisterLoadBalancing')
-
-    def do_deregister_tokens(self):
-        self._do_deregister('deregister_tokens',
-                            'eucadmin.deregistertokens',
-                            'DeregisterTokens')
 
     def _sync_node(self, node):
-        try:
-            tmp_keys = ['cloud-pk.pem', 'ncrc']
-            self._sync_keys_if_necessary(tmp_keys, host=node)
-            self.warn('************************************************************************************')
-            self.warn('This DEVELOPMENT version of Eucalyptus requires cloud-level credentials on all nodes')
-            self.warn('Such arrangement of credentials is not secure and should NEVER be used in production')
-            self.warn('************************************************************************************')
-        except Exception, err:
-            print Exception, err
-            self.warn('Failed to sync cloud-level credentials with a node, downloads from Object Store will fail')
         keys = ['node-cert.pem', 'cluster-cert.pem', 'cloud-cert.pem',
                 'node-pk.pem']
         return self._sync_keys_if_necessary(keys, host=node)

@@ -63,25 +63,27 @@
 package com.eucalyptus.blockstorage;
 
 
-import java.net.URL;
-import java.util.List;
-
+import com.eucalyptus.blockstorage.entities.SnapshotInfo;
+import com.eucalyptus.blockstorage.entities.VolumeInfo;
+import com.eucalyptus.blockstorage.util.StorageProperties;
+import com.eucalyptus.entities.EntityWrapper;
+import com.eucalyptus.util.EucalyptusCloudException;
 import org.apache.commons.httpclient.HttpClient;
 import org.apache.commons.httpclient.methods.GetMethod;
 import org.apache.log4j.Logger;
 
-import com.eucalyptus.blockstorage.entities.SnapshotInfo;
-import com.eucalyptus.blockstorage.entities.VolumeInfo;
-import com.eucalyptus.blockstorage.exceptions.SnapshotTransferException;
-import com.eucalyptus.blockstorage.util.StorageProperties;
-import com.eucalyptus.entities.EntityWrapper;
-import com.eucalyptus.util.EucalyptusCloudException;
+
+import java.io.File;
+import java.net.URL;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.UUID;
 
 public class BlockStorageChecker {
 	private static Logger LOG = Logger.getLogger(BlockStorageChecker.class);
 	private LogicalStorageManager blockManager;
 	private static boolean transferredPending = false;
-	S3SnapshotTransfer snapshotTransfer;
 
 	public BlockStorageChecker(LogicalStorageManager blockManager) {
 		this.blockManager = blockManager;
@@ -119,8 +121,8 @@ public class BlockStorageChecker {
 	}
 
 	public void cleanSnapshots() {
-		cleanFailedSnapshots();
 		cleanStuckSnapshots();
+		cleanFailedSnapshots();
 	}
 
 	public void cleanStuckVolumes() {
@@ -170,8 +172,10 @@ public class BlockStorageChecker {
 		snapshotInfo.setStatus(StorageProperties.Status.creating.toString());
 		List<SnapshotInfo> snapshotInfos = db.query(snapshotInfo);
 		for(SnapshotInfo snapInfo : snapshotInfos) {
-			// Mark them as failed so that it gets reflected in the CLC and the clean up routine picks them up later
-			snapInfo.setStatus(StorageProperties.Status.failed.toString());
+			String snapshotId = snapInfo.getSnapshotId();
+			LOG.info("Cleaning failed snapshot " + snapshotId);
+			blockManager.cleanSnapshot(snapshotId);
+			db.delete(snapInfo);
 		}
 		db.commit();
 	}
@@ -182,7 +186,9 @@ public class BlockStorageChecker {
 		snapshotInfo.setStatus(StorageProperties.Status.failed.toString());
 		List<SnapshotInfo> snapshotInfos = db.query(snapshotInfo);
 		for(SnapshotInfo snapInfo : snapshotInfos) {
-			cleanSnapshot(snapInfo);
+			String snapshotId = snapInfo.getSnapshotId();
+			LOG.info("Cleaning failed snapshot " + snapshotId);
+			blockManager.cleanSnapshot(snapshotId);
 			db.delete(snapInfo);
 		}
 		db.commit();
@@ -194,43 +200,11 @@ public class BlockStorageChecker {
 		List<SnapshotInfo> snapshotInfos = db.query(snapshotInfo);
 		if(snapshotInfos.size() > 0) {
 			SnapshotInfo snapInfo = snapshotInfos.get(0);
-			cleanSnapshot(snapInfo);
+			LOG.info("Cleaning failed snapshot " + snapshotId);
+			blockManager.cleanSnapshot(snapshotId);
 			db.delete(snapInfo);
 		}
 		db.commit();
-	}
-	
-	private void cleanSnapshot(SnapshotInfo snapInfo) {
-		String snapshotId = snapInfo.getSnapshotId();
-
-		LOG.info("Checker task cleaning up snapshot " + snapshotId);
-		try {
-			LOG.debug("Disconnecting snapshot " + snapshotId + " from the Storage Controller");
-			blockManager.finishVolume(snapshotId);
-		} catch (Exception e) {
-			LOG.debug("Attempt to disconnect snapshot " + snapshotId + " from Storage Controller failed because: " + e.getMessage());
-		}
-
-		try {
-			LOG.debug("Cleaning snapshot " + snapshotId + " on storage backend");
-			blockManager.cleanSnapshot(snapshotId);
-		} catch (Exception e) {
-			LOG.debug("Attempt to clean snapshot " + snapshotId + " on storage backend failed because: " + e.getMessage());
-		}
-
-		try {
-			LOG.debug("Cleaning snapshot " + snapshotId + " from objectsotrage");
-			if(snapshotTransfer == null) {
-				snapshotTransfer = new S3SnapshotTransfer();
-			} 
-			String[] names = SnapshotInfo.getSnapshotBucketKeyNames(snapInfo.getSnapshotLocation());
-			snapshotTransfer.setSnapshotId(snapshotId);
-			snapshotTransfer.setBucketName(names[0]);
-			snapshotTransfer.setKeyName(names[1]);
-			snapshotTransfer.cancelUpload();
-		} catch (Exception e) {
-			LOG.debug("Attempt to clean uploaded snapshot " + snapshotId + " from objectstorage failed because: " + e.getMessage());
-		}
 	}
 
 	public void transferPendingSnapshots() throws EucalyptusCloudException {
@@ -253,7 +227,7 @@ public class BlockStorageChecker {
 			httpClient.executeMethod(getMethod);
 			StorageProperties.enableSnapshots = true;
 		} catch(Exception ex) {
-			LOG.error("Could not connect to ObjectStorage. Snapshot functionality disabled. Please check the ObjectStorage url.");
+			LOG.error("Could not connect to Walrus. Snapshot functionality disabled. Please check the Walrus url.");
 			StorageProperties.enableSnapshots = false;
 		} finally {
 			if(getMethod != null)
@@ -268,39 +242,38 @@ public class BlockStorageChecker {
 		}
 
 		public void run() {
-//			TODO BROKEN, FIX IT!
-//			EntityWrapper<SnapshotInfo> db = StorageProperties.getEntityWrapper();
-//			SnapshotInfo snapshotInfo = new SnapshotInfo();
-//			snapshotInfo.setShouldTransfer(true);
-//			List<SnapshotInfo> snapshotInfos = db.query(snapshotInfo);
-//			if(snapshotInfos.size() > 0) {
-//				SnapshotInfo snapInfo = snapshotInfos.get(0);
-//				String snapshotId = snapInfo.getSnapshotId();
-//				List<String> returnValues;
-//				try {
-//					returnValues = blockManager.prepareForTransfer(snapshotId);
-//				} catch (EucalyptusCloudException e) {
-//					db.rollback();
-//					LOG.error(e);
-//					return;
-//				}
-//				if(returnValues.size() > 0) {
-//					String snapshotFileName = returnValues.get(0);
-//					File snapshotFile = new File(snapshotFileName);
-//					Map<String, String> httpParamaters = new HashMap<String, String>();
-//					HttpWriter httpWriter;
-//					SnapshotProgressCallback callback = new SnapshotProgressCallback(snapshotId, snapshotFile.length(), StorageProperties.TRANSFER_CHUNK_SIZE);
-//					httpWriter = new HttpWriter("PUT", snapshotFile, String.valueOf(snapshotFile.length()), callback, "snapset-" + UUID.randomUUID(), snapshotId, "StoreSnapshot", null, httpParamaters);
-//					try {
-//						httpWriter.run();
-//					} catch(Exception ex) {
-//						db.rollback();
-//						LOG.error(ex, ex);
-//						checker.cleanFailedSnapshot(snapshotId);
-//					}
-//				}
-//			}
-//			db.commit();	
+			EntityWrapper<SnapshotInfo> db = StorageProperties.getEntityWrapper();
+			SnapshotInfo snapshotInfo = new SnapshotInfo();
+			snapshotInfo.setShouldTransfer(true);
+			List<SnapshotInfo> snapshotInfos = db.query(snapshotInfo);
+			if(snapshotInfos.size() > 0) {
+				SnapshotInfo snapInfo = snapshotInfos.get(0);
+				String snapshotId = snapInfo.getSnapshotId();
+				List<String> returnValues;
+				try {
+					returnValues = blockManager.prepareForTransfer(snapshotId);
+				} catch (EucalyptusCloudException e) {
+					db.rollback();
+					LOG.error(e);
+					return;
+				}
+				if(returnValues.size() > 0) {
+					String snapshotFileName = returnValues.get(0);
+					File snapshotFile = new File(snapshotFileName);
+					Map<String, String> httpParamaters = new HashMap<String, String>();
+					HttpWriter httpWriter;
+					SnapshotProgressCallback callback = new SnapshotProgressCallback(snapshotId, snapshotFile.length(), StorageProperties.TRANSFER_CHUNK_SIZE);
+					httpWriter = new HttpWriter("PUT", snapshotFile, String.valueOf(snapshotFile.length()), callback, "snapset-" + UUID.randomUUID(), snapshotId, "StoreSnapshot", null, httpParamaters);
+					try {
+						httpWriter.run();
+					} catch(Exception ex) {
+						db.rollback();
+						LOG.error(ex, ex);
+						checker.cleanFailedSnapshot(snapshotId);
+					}
+				}
+			}
+			db.commit();	
 		}
 	}
 }

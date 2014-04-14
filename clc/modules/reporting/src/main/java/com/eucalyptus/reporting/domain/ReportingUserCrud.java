@@ -1,5 +1,5 @@
 /*************************************************************************
- * Copyright 2009-2013 Eucalyptus Systems, Inc.
+ * Copyright 2009-2012 Eucalyptus Systems, Inc.
  *
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -19,10 +19,11 @@
  ************************************************************************/
 package com.eucalyptus.reporting.domain;
 
+import java.util.*;
+
 import org.apache.log4j.Logger;
 
-import com.eucalyptus.entities.Entities;
-import com.eucalyptus.entities.TransactionResource;
+import com.eucalyptus.entities.EntityWrapper;
 
 /**
  * <p>ReportingUserCrud is an object for CReating, Updating, and Deleting users. This class should
@@ -56,14 +57,21 @@ public class ReportingUserCrud
 	{
 		if (id==null || accountId==null || name==null) throw new IllegalArgumentException("args cant be null");
 
+		if (ReportingAccountDao.getInstance().getReportingAccount(accountId)==null) {
+			LOG.error("Non-matching account for user, userId:" + id + " accountId:" + accountId + " name:" + name, new IllegalArgumentException());
+		}
+
+		ReportingUser user = new ReportingUser(id, accountId, name);
 		ReportingUser oldUser = ReportingUserDao.getInstance().getReportingUser(id);
 		if (oldUser!=null && oldUser.getName().equals(name)) {
 			return;
 		} else if (oldUser!=null) {
 			updateInDb(id, name);
+			ReportingUserDao.getInstance().putCache(user);
 		} else {
-			try {
+			try {			
 				addToDb(id, accountId, name);
+				ReportingUserDao.getInstance().putCache(user);
 			} catch (RuntimeException e) {
 				LOG.error(e);
 			}
@@ -75,13 +83,19 @@ public class ReportingUserCrud
 	{
 		LOG.debug("Update reporting user in db, id:" + id + " name:" + name);
 
-		try ( final TransactionResource db = Entities.transactionFor( ReportingUser.class ) ) {
-			final ReportingUser searchUser = new ReportingUser( );
-			searchUser.setId( id );
-			Entities.uniqueResult( searchUser ).setName( name );
-			db.commit();
+		EntityWrapper<ReportingUser> entityWrapper =
+			EntityWrapper.get(ReportingUser.class);
+
+		try {
+			ReportingUser reportingUser = (ReportingUser)
+			entityWrapper.createQuery("from ReportingUser where id = ?")
+			.setString(0, id)
+			.uniqueResult();
+			reportingUser.setName(name);
+			entityWrapper.commit();
 		} catch (Exception ex) {
 			LOG.error(ex);
+			entityWrapper.rollback();
 			throw new RuntimeException(ex);
 		}			
 	}
@@ -90,11 +104,15 @@ public class ReportingUserCrud
 	{
 		LOG.debug("Add reporting user to db, id:" + id + " accountId:" + accountId + " name:" + name);
 
-		try ( final TransactionResource db = Entities.transactionFor( ReportingUser.class ) ) {
-			Entities.persist( new ReportingUser( id, accountId, name ) );
-			db.commit();
+		EntityWrapper<ReportingUser> entityWrapper =
+			EntityWrapper.get(ReportingUser.class);
+
+		try {
+			entityWrapper.add(new ReportingUser(id, accountId, name));
+			entityWrapper.commit();
 		} catch (Exception ex) {
 			LOG.error(ex);
+			entityWrapper.rollback();
 			throw new RuntimeException(ex);
 		}					
 	}

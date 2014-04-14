@@ -90,7 +90,6 @@ import java.util.Arrays;
 
 
 //All HttpTransfer operations should be called asynchronously. The operations themselves are synchronous.
-@Deprecated
 public class HttpTransfer {	
 	private static Logger LOG = Logger.getLogger(HttpTransfer.class);
 	protected HttpClient httpClient;
@@ -99,9 +98,6 @@ public class HttpTransfer {
 	protected static final String EUCA2_AUTH_ID = "EUCA2-RSA-SHA256";
 	protected static final String EUCA2_AUTH_HEADER_NAME = "Authorization";
 	protected static final String ISO_8601_FORMAT = "yyyyMMdd'T'HHmmss'Z'"; //Use the ISO8601 format
-
-    private static final String EUCALYPTUS_OPERATION = "EucaOperation";
-    private static final String EUCALYPTUS_HEADER = "EucaHeader";
 
 	/**
 	 * Calculates and sets the Authorization header value for the request using the EucaRSA-V2 signing algorithm
@@ -275,7 +271,7 @@ public class HttpTransfer {
 	 * That case is useful for constructing the request and then adding headers explicitly before signing takes place.
 	 * @param verb - The HTTP verb GET|PUT|POST|DELETE|UPDATE
 	 * @param addr - THe destination address for the request
-	 * @param eucaOperation - The EucaOperation, if any (e.g. StoreSnapshot, GetWalrusSnapshot, or other values from ObjectStorageProperties.StorageOperations)
+	 * @param eucaOperation - The EucaOperation, if any (e.g. StoreSnapshot, GetWalrusSnapshot, or other values from WalrusProperties.StorageOperations)
 	 * @param eucaHeader - The Euca Header value, if any. This is not typically used.
 	 * @param signRequest - Determines if the request is signed at construction time or must be done explicitly later (boolean)
 	 * @return
@@ -310,9 +306,9 @@ public class HttpTransfer {
 		method.setRequestHeader("Date", date);
 		//method.setRequestHeader("Expect", "100-continue");
 
-		method.setRequestHeader(EUCALYPTUS_OPERATION, eucaOperation);
+		method.setRequestHeader(StorageProperties.EUCALYPTUS_OPERATION, eucaOperation);
 		if(eucaHeader != null) {
-			method.setRequestHeader(EUCALYPTUS_HEADER, eucaHeader);
+			method.setRequestHeader(StorageProperties.EUCALYPTUS_HEADER, eucaHeader);
 		}
 		
 		if(signRequest) {

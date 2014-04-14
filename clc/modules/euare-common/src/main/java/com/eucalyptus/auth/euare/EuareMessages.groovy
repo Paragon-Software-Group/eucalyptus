@@ -151,7 +151,6 @@ public class CreateGroupType extends EuareMessage {
 }
 @PolicyAction( vendor = PolicySpec.VENDOR_IAM, action = PolicySpec.IAM_UPDATESERVERCERTIFICATE )
 public class UpdateServerCertificateType extends EuareMessage {
-  String delegateAccount
   String serverCertificateName;
   String newPath;
   String newServerCertificateName;
@@ -191,7 +190,6 @@ public class AddUserToGroupResponseType extends EuareMessage {
 }
 @PolicyAction( vendor = PolicySpec.VENDOR_IAM, action = PolicySpec.IAM_DELETESERVERCERTIFICATE )
 public class DeleteServerCertificateType extends EuareMessage {
-  String delegateAccount
   String serverCertificateName;
   public DeleteServerCertificateType() {  }
 }
@@ -201,7 +199,6 @@ public class UpdateAccessKeyResponseType extends EuareMessage {
 }
 @PolicyAction( vendor = PolicySpec.VENDOR_IAM, action = PolicySpec.IAM_UPLOADSERVERCERTIFICATE )
 public class UploadServerCertificateType extends EuareMessage {
-  String delegateAccount
   String path;
   String serverCertificateName;
   String certificateBody;
@@ -465,7 +462,6 @@ public class UserType extends EucalyptusData {
   String userName;
   String userId;
   String arn;
-  Date createDate;
   String enabled;
   String regStatus;
   String passwordExpiration;
@@ -566,7 +562,6 @@ public class GroupType extends EucalyptusData {
   String groupName;
   String groupId;
   String arn;
-  Date createDate
   public GroupType() {  }
 }
 @PolicyAction( vendor = PolicySpec.VENDOR_IAM, action = PolicySpec.IAM_UPDATESIGNINGCERTIFICATE )
@@ -688,7 +683,6 @@ public class CreateGroupResultType extends EucalyptusData {
 }
 @PolicyAction( vendor = PolicySpec.VENDOR_IAM, action = PolicySpec.IAM_GETSERVERCERTIFICATE )
 public class GetServerCertificateType extends EuareMessage {
-  String delegateAccount
   String serverCertificateName;
   public GetServerCertificateType() {  }
 }
@@ -728,7 +722,6 @@ public class ListMFADevicesType extends EuareMessage {
 }
 @PolicyAction( vendor = PolicySpec.VENDOR_IAM, action = PolicySpec.IAM_LISTSERVERCERTIFICATES )
 public class ListServerCertificatesType extends EuareMessage {
-  String delegateAccount
   String pathPrefix;
   String marker;
   Integer maxItems;
@@ -1039,62 +1032,6 @@ public class GetLdapSyncStatusResultType extends EucalyptusData {
   Boolean inSync;
   public GetLdapSyncStatusResultType() {  }
 }
-
-public class SignCertificateType extends EuareMessage {
-  String certificate;
-  public SignCertificateType(){ }
-}
-
-public class SignCertificateResponseType extends EuareMessage {
-  SignCertificateResultType signCertificateResult = new SignCertificateResultType();
-  ResponseMetadataType responseMetadata = new ResponseMetadataType( );
-  public SignCertificateResponseType() { }
-}
-
-public class SignCertificateResultType extends EucalyptusData {
-  String certificate;
-  String signature;
-}
-
-@PolicyAction( vendor = PolicySpec.VENDOR_IAM, action = PolicySpec.IAM_DOWNLOADSERVERCERTIFICATE )
-public class DownloadServerCertificateType extends EuareMessage {
-  String certificateArn;  // ARN of the server certificate
-  String delegationCertificate; // Requester's certificate
-  String authSignature; // Signature issued by Euare as a token of authorization
-  Date timestamp; // Current time
-  String signature; // Signature {ARN+timestamp} signed by requester's pk
-   
-  public DownloadServerCertificateType(){ }
-}
-
-public class DownloadServerCertificateResponseType extends EuareMessage {
-  DownloadServerCertificateResultType downloadServerCertificateResult = new DownloadServerCertificateResultType();
-  ResponseMetadataType responseMetadata = new ResponseMetadataType( );
-  public DownloadServerCertificateResponseType() { }
-}
-
-public class DownloadServerCertificateResultType extends EucalyptusData {
-  String certificateArn;
-  String serverCertificate;
-  String serverPk; // encrypted server PK using delegation certificate (Loadbalancer VMs)
-  String signature; // Signature {ARN+timestamp} signed by Euare's PK
-}
-
-@PolicyAction( vendor = PolicySpec.VENDOR_IAM, action = PolicySpec.IAM_DOWNLOADCLOUDCERTIFICATE )
-public class DownloadCloudCertificateType extends EuareMessage {
-  public DownloadCloudCertificateType(){ }
-}
-
-public class DownloadCloudCertificateResponseType extends EuareMessage {
-  DownloadCloudCertificateResultType downloadCloudCertificateResult = new DownloadCloudCertificateResultType();
-  ResponseMetadataType responseMetadata = new ResponseMetadataType( );
-  public DownloadCloudCertificateResponseType() { }
-}
-
-public class DownloadCloudCertificateResultType extends EucalyptusData {
-  String cloudCertificate;
-}
-
 
 @PolicyAction( vendor = PolicySpec.VENDOR_IAM, action = PolicySpec.IAM_GETROLE )
 public class GetRoleType extends EuareMessage {

@@ -1,5 +1,5 @@
 /*************************************************************************
- * Copyright 2009-2014 Eucalyptus Systems, Inc.
+ * Copyright 2009-2013 Eucalyptus Systems, Inc.
  *
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -70,13 +70,14 @@ import java.util.Collection;
 import java.util.Collections;
 import java.util.Comparator;
 import java.util.Date;
-import java.util.EnumSet;
 import java.util.HashMap;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
+import java.util.NavigableSet;
 import java.util.NoSuchElementException;
 import java.util.Set;
+import java.util.TreeMap;
 import java.util.TreeSet;
 import java.util.concurrent.Callable;
 import java.util.concurrent.ExecutionException;
@@ -84,9 +85,7 @@ import java.util.concurrent.TimeUnit;
 import javax.annotation.Nonnull;
 import javax.annotation.Nullable;
 import javax.persistence.CascadeType;
-import javax.persistence.CollectionTable;
 import javax.persistence.Column;
-import javax.persistence.ElementCollection;
 import javax.persistence.Embedded;
 import javax.persistence.Entity;
 import javax.persistence.EntityTransaction;
@@ -96,9 +95,7 @@ import javax.persistence.ManyToMany;
 import javax.persistence.OneToMany;
 import javax.persistence.OneToOne;
 import javax.persistence.PersistenceContext;
-import javax.persistence.PrePersist;
 import javax.persistence.PreRemove;
-import javax.persistence.PreUpdate;
 import javax.persistence.Table;
 import org.apache.log4j.Logger;
 import org.bouncycastle.util.encoders.Base64;
@@ -108,6 +105,8 @@ import org.hibernate.annotations.NotFound;
 import org.hibernate.annotations.NotFoundAction;
 import org.hibernate.criterion.Restrictions;
 import org.hibernate.criterion.SimpleExpression;
+import com.eucalyptus.address.Address;
+import com.eucalyptus.address.Addresses;
 import com.eucalyptus.auth.Accounts;
 import com.eucalyptus.auth.AuthException;
 import com.eucalyptus.auth.policy.ern.Ern;
@@ -117,15 +116,16 @@ import com.eucalyptus.auth.principal.InstanceProfile;
 import com.eucalyptus.auth.principal.Role;
 import com.eucalyptus.auth.principal.UserFullName;
 import com.eucalyptus.blockstorage.State;
+import com.eucalyptus.blockstorage.Storage;
 import com.eucalyptus.blockstorage.Volume;
 import com.eucalyptus.blockstorage.Volumes;
-import com.eucalyptus.compute.common.CloudMetadata.VmInstanceMetadata;
-import com.eucalyptus.compute.common.CloudMetadatas;
-import com.eucalyptus.compute.common.ImageMetadata.Platform;
+import com.eucalyptus.blockstorage.msgs.DeleteStorageVolumeResponseType;
+import com.eucalyptus.blockstorage.msgs.DeleteStorageVolumeType;
+import com.eucalyptus.cloud.CloudMetadata.VmInstanceMetadata;
+import com.eucalyptus.cloud.CloudMetadatas;
+import com.eucalyptus.cloud.ImageMetadata;
+import com.eucalyptus.cloud.ImageMetadata.Platform;
 import com.eucalyptus.cloud.ResourceToken;
-import com.eucalyptus.cloud.VmInstanceLifecycleHelpers;
-import com.eucalyptus.cloud.run.AdmissionControl;
-import com.eucalyptus.cloud.run.Allocations;
 import com.eucalyptus.cloud.run.Allocations.Allocation;
 import com.eucalyptus.cloud.util.MetadataException;
 import com.eucalyptus.cloud.util.NoSuchMetadataException;
@@ -135,6 +135,7 @@ import com.eucalyptus.component.ComponentIds;
 import com.eucalyptus.component.Partition;
 import com.eucalyptus.component.Partitions;
 import com.eucalyptus.component.ServiceConfiguration;
+import com.eucalyptus.component.ServiceConfigurations;
 import com.eucalyptus.component.Topology;
 import com.eucalyptus.component.id.ClusterController;
 import com.eucalyptus.component.id.Dns;
@@ -146,6 +147,7 @@ import com.eucalyptus.crypto.util.Timestamps;
 import com.eucalyptus.entities.Entities;
 import com.eucalyptus.entities.TransactionExecutionException;
 import com.eucalyptus.entities.TransientEntityException;
+import com.eucalyptus.entities.UserMetadata;
 import com.eucalyptus.event.ListenerRegistry;
 import com.eucalyptus.images.BlockStorageImageInfo;
 import com.eucalyptus.images.BootableImageInfo;
@@ -154,7 +156,7 @@ import com.eucalyptus.images.Emis.BootableSet;
 import com.eucalyptus.images.MachineImageInfo;
 import com.eucalyptus.keys.KeyPairs;
 import com.eucalyptus.keys.SshKeyPair;
-import com.eucalyptus.network.EdgeNetworking;
+import com.eucalyptus.network.ExtantNetwork;
 import com.eucalyptus.network.NetworkGroup;
 import com.eucalyptus.network.NetworkGroups;
 import com.eucalyptus.network.PrivateNetworkIndex;
@@ -165,14 +167,12 @@ import com.eucalyptus.tokens.AssumeRoleType;
 import com.eucalyptus.tokens.CredentialsType;
 import com.eucalyptus.upgrade.Upgrades.EntityUpgrade;
 import com.eucalyptus.upgrade.Upgrades.Version;
-import com.eucalyptus.util.Callback;
 import com.eucalyptus.util.CollectionUtils;
 import com.eucalyptus.util.Exceptions;
 import com.eucalyptus.util.FullName;
 import com.eucalyptus.util.OwnerFullName;
 import com.eucalyptus.util.RestrictedTypes;
 import com.eucalyptus.util.TypeMapper;
-import com.eucalyptus.util.TypeMappers;
 import com.eucalyptus.util.async.AsyncRequests;
 import com.eucalyptus.vm.VmBundleTask.BundleState;
 import com.eucalyptus.vm.VmInstance.VmState;
@@ -203,7 +203,6 @@ import com.google.common.collect.TreeMultimap;
 import edu.ucsb.eucalyptus.cloud.VirtualBootRecord;
 import edu.ucsb.eucalyptus.cloud.VmInfo;
 import edu.ucsb.eucalyptus.msgs.AttachedVolume;
-import edu.ucsb.eucalyptus.msgs.GroupItemType;
 import edu.ucsb.eucalyptus.msgs.IamInstanceProfile;
 import edu.ucsb.eucalyptus.msgs.InstanceBlockDeviceMapping;
 import edu.ucsb.eucalyptus.msgs.InstanceStateType;
@@ -229,7 +228,6 @@ public class VmInstance extends UserMetadata<VmState> implements VmInstanceMetad
   public static final String         DEFAULT_TYPE         = "m1.small";
   public static final String         ROOT_DEVICE_TYPE_EBS = "ebs";
   public static final String         ROOT_DEVICE_TYPE_INSTANCE_STORE = "instance-store";
-  public static final String         ID_PREFIX = "i";
 
   @Embedded
   private VmNetworkConfig      networkConfig;
@@ -257,13 +255,7 @@ public class VmInstance extends UserMetadata<VmState> implements VmInstanceMetad
                fetch = FetchType.LAZY )
   @Cache( usage = CacheConcurrencyStrategy.TRANSACTIONAL )
   private Set<NetworkGroup>    networkGroups    = Sets.newHashSet( );
-
-  @ElementCollection
-  @CollectionTable( name = "metadata_vm_instance_groups" )
-  @JoinColumn( name = "metadata_vm_instance_id" )
-  @Cache( usage = CacheConcurrencyStrategy.TRANSACTIONAL )
-  private Set<NetworkGroupId>  networkGroupIds = Sets.newHashSet( );
-
+  
   @NotFound( action = NotFoundAction.IGNORE )
   @OneToOne( fetch = FetchType.LAZY,
              cascade = { CascadeType.ALL },
@@ -280,10 +272,22 @@ public class VmInstance extends UserMetadata<VmState> implements VmInstanceMetad
   private Collection<VmInstanceTag> tags;
   
   @PreRemove
-  private void cleanUp( ) {
-    LOG.debug( "Running cleanup for instance " + getDisplayName() );
-    VmInstanceLifecycleHelpers.get( ).cleanUpInstance( this, VmState.BURIED );
+  void cleanUp( ) {
+    if ( this.networkGroups != null ) {
+      this.networkGroups.clear( );
+      this.networkGroups = null;
+    }
+    try {
+      if ( this.networkIndex != null ) {
+        this.networkIndex.release( );
+        this.networkIndex.teardown( );
+        this.networkIndex = null;
+      }
+    } catch ( final ResourceAllocationException ex ) {
+      LOG.error( ex, ex );
+    }
   }
+
 
   public enum Filters implements Predicate<VmInstance> {
     BUNDLING {
@@ -312,37 +316,31 @@ public class VmInstance extends UserMetadata<VmState> implements VmInstanceMetad
       
     },
     EXPECTING_TEARDOWN( VmState.STOPPING, VmState.SHUTTING_DOWN ),
-    TORNDOWN( VmState.STOPPED, VmState.TERMINATED, VmState.BURIED ),
+    TORNDOWN( VmState.STOPPED, VmState.TERMINATED ),
     STOP( VmState.STOPPING, VmState.STOPPED ),
-    NOT_RUNNING( VmState.STOPPING, VmState.STOPPED, VmState.SHUTTING_DOWN, VmState.TERMINATED, VmState.BURIED ),
+    TERM( VmState.SHUTTING_DOWN, VmState.TERMINATED ),
+    NOT_RUNNING( VmState.STOPPING, VmState.STOPPED, VmState.SHUTTING_DOWN, VmState.TERMINATED ),
     DONE( VmState.TERMINATED, VmState.BURIED );
 
-    private final Set<VmState> states;
+    private Set<VmState> states;
     
     VmStateSet( final VmState... states ) {
-      this.states = Collections.unmodifiableSet( EnumSet.copyOf( Sets.newHashSet( states ) ) );
+      this.states = Sets.newHashSet( states );
     }
     
     @Override
     public boolean apply( final VmInstance arg0 ) {
       return this.states.contains( arg0.getState( ) );
     }
-
-    public boolean contains( final VmState state ) {
-      return this.states.contains( state );
+    
+    public boolean contains( final Object o ) {
+      return this.states.contains( o );
     }
     
     public Predicate<VmInstance> not( ) {
       return Predicates.not( this );
     }
-
-    public Set<VmState> set( ) {
-      return states;
-    }
-
-    public VmState[] array( ) {
-      return states.toArray( new VmState[ states.size( ) ] );
-    }
+    
   }
   
   public enum VmState implements Predicate<VmInstance> {
@@ -352,22 +350,15 @@ public class VmInstance extends UserMetadata<VmState> implements VmInstanceMetad
     TERMINATED( 48 ),
     STOPPING( 64 ),
     STOPPED( 80 ),
-    BURIED( 128, TERMINATED );
-
-    private final String name;
-    private final int    code;
-    private final VmState displayState;
+    BURIED( 128 );
+    private String name;
+    private int    code;
     
     VmState( final int code ) {
-      this( code, null );
-    }
-
-    VmState( final int code, final VmState displayState ) {
       this.name = this.name( ).toLowerCase( ).replace( "_", "-" );
       this.code = code;
-      this.displayState = Objects.firstNonNull( displayState, this );
     }
-
+    
     public String getName( ) {
       return this.name;
     }
@@ -375,11 +366,7 @@ public class VmInstance extends UserMetadata<VmState> implements VmInstanceMetad
     public int getCode( ) {
       return this.code;
     }
-
-    public VmState getDisplayState( ) {
-      return this.displayState;
-    }
-
+    
     public static class Mapper {
       private static Map<String, VmState> stateMap = getStateMap( );
       
@@ -479,46 +466,45 @@ public class VmInstance extends UserMetadata<VmState> implements VmInstanceMetad
         return false;
       } else {
         final UserFullName userFullName = UserFullName.getInstance( input.getOwnerId( ) );
+        final EntityTransaction db = Entities.get( VmInstance.class );
         boolean building = false;
-        Allocation allocation = null;
         try {
+          final List<NetworkGroup> networks = RestoreAllocation.restoreNetworks( input, userFullName );
+          final PrivateNetworkIndex index = RestoreAllocation.restoreNetworkIndex( input, networks );
+          final VmType vmType = RestoreAllocation.restoreVmType( input );
+          final Partition partition = RestoreAllocation.restorePartition( input );
           final String imageId = RestoreAllocation.restoreImage( input );
           final String kernelId = RestoreAllocation.restoreKernel( input );
           final String ramdiskId = RestoreAllocation.restoreRamdisk( input );
-
-          allocation = Allocations.restore(
-              input,
-              RestoreAllocation.restoreLaunchIndex( input ),
-              RestoreAllocation.restoreVmType( input ),
-              RestoreAllocation.restoreBootSet( input, imageId, kernelId, ramdiskId ),
-              RestoreAllocation.restorePartition( input ),
-              RestoreAllocation.restoreSshKeyPair( input, userFullName ),
-              RestoreAllocation.restoreUserData( input ),
-              userFullName );
-
-          final List<NetworkGroup> networks = RestoreAllocation.restoreNetworks( input, userFullName );
-          allocation.setNetworkRules( CollectionUtils.putAll(
-              networks,
-              Maps.<String,NetworkGroup>newLinkedHashMap( ),
-              RestrictedTypes.toDisplayName( ),
-              Functions.<NetworkGroup>identity( ) ) );
-
-          VmInstanceLifecycleHelpers.get().prepareAllocation( input, allocation );
-
-          AdmissionControl.restore( ).apply( allocation );
-
+          final BootableSet bootSet = RestoreAllocation.restoreBootSet( input, imageId, kernelId, ramdiskId );
+          final int launchIndex = RestoreAllocation.restoreLaunchIndex( input );
+          final SshKeyPair keyPair = RestoreAllocation.restoreSshKeyPair( input, userFullName );
+          final byte[] userData = RestoreAllocation.restoreUserData( input );
           building = true;
-          allocation.commit();
-
-          final ResourceToken token = Iterables.getOnlyElement( allocation.getAllocationTokens() );
-          VmInstanceLifecycleHelpers.get().restoreInstanceResources( token, input );
-
+          final VmInstance vmInst = new VmInstance.Builder( ).owner( userFullName )
+                                              .withIds( input.getInstanceId( ),
+                                                        input.getReservationId( ),
+                                                        null, null )
+                                              .bootRecord( bootSet,
+                                                           userData,
+                                                           keyPair,
+                                                           vmType,
+                                                           Boolean.FALSE,
+                                                           null, null, null )
+                                              .placement( partition, partition.getName( ) )
+                                              .networking( networks, index )
+                                              .build( launchIndex );
+          vmInst.setNaturalId( input.getUuid( ) );
+          RestoreAllocation.restoreAddress( input, vmInst );
+          Entities.persist( vmInst );
+          db.commit( );
           return true;
         } catch ( final Exception ex ) {
-          if ( allocation != null ) allocation.abort( );
-          LOG.error( "Failed to restore instance " + input.getInstanceId( ) + " because of: " + ex.getMessage( ), /*building ? null :*/ ex );
+          LOG.error( "Failed to restore instance " + input.getInstanceId( ) + " because of: " + ex.getMessage( ), building ? null : ex );
           Logs.extreme( ).error( ex, ex );
           return false;
+        } finally {
+          if ( db.isActive() ) db.rollback();
         }
       }
 //TODO:GRZE: this is the case in restore where we either need to report the failed instance restore, terminate the instance, or handle partial reporting of the instance info.
@@ -526,7 +512,45 @@ public class VmInstance extends UserMetadata<VmState> implements VmInstanceMetad
 //        ClusterConfiguration config = Clusters.getInstance( ).lookup( runVm.getPlacement( ) ).getConfiguration( );
 //        AsyncRequests.newRequest( new TerminateCallback( runVm.getInstanceId( ) ) ).dispatch( runVm.getPlacement( ) );
     }
-
+    
+    private static PrivateNetworkIndex restoreNetworkIndex( final VmInfo input, final List<NetworkGroup> networks ) {
+      PrivateNetworkIndex index = null;
+      String displayName = null;
+      if ( networks.isEmpty( ) ) {
+        LOG.warn( "Failed to recover network index for " + input.getInstanceId( )
+                  + " because no network group information is available: "
+                  + input.getGroupNames( ) );
+      } else {
+        final EntityTransaction db = Entities.get( NetworkGroup.class );
+        try {
+          final NetworkGroup network = networks.get( 0 );
+          final NetworkGroup entity = Entities.merge( network );
+          displayName = entity.getDisplayName();
+          ExtantNetwork exNet = null;
+          if ( entity.hasExtantNetwork( ) && entity.extantNetwork( ).getTag( ).equals( input.getNetParams( ).getVlan( ) ) ) {
+            LOG.info( "Found matching extant network for " + input.getInstanceId( ) + ": " + entity.extantNetwork( ) );
+            index = entity.extantNetwork( ).reclaimNetworkIndex( input.getNetParams( ).getNetworkIndex( ) );
+          } else if ( entity.hasExtantNetwork( ) && !entity.extantNetwork( ).getTag( ).equals( input.getNetParams( ).getVlan( ) ) ) {
+            LOG.warn( "Found conflicting extant network for " + input.getInstanceId( ) + ": " + entity.extantNetwork( ) );
+          } else {
+            LOG.debug( "Restoring extant network for " + input.getInstanceId( ) + ": " + input.getNetParams( ).getVlan( ) );
+            exNet = entity.reclaim( input.getNetParams( ).getVlan( ) );
+            LOG.info( "Restore extant network for " + input.getInstanceId( ) + ": " + entity.extantNetwork( ) );
+            LOG.debug( "Restoring private network index for " + input.getInstanceId( ) + ": " + input.getNetParams( ).getNetworkIndex( ) );
+            index = exNet.reclaimNetworkIndex( input.getNetParams( ).getNetworkIndex( ) );
+          }
+          db.commit( );
+        } catch ( final Exception ex ) {
+          LOG.debug(" Failed to restore network index for instanceid " + input.getInstanceId( ) + ": vlan " + input.getNetParams( ).getVlan( )
+                  + ": Entity " + displayName + " because of: " + ex.getMessage());
+          Logs.extreme( ).error( ex, ex );
+        } finally {
+          if ( db.isActive() ) db.rollback();
+        }
+      }
+      return index;
+    }
+    
     private static List<NetworkGroup> restoreNetworks( final VmInfo input, final UserFullName userFullName ) {
 	final List<NetworkGroup> networks = Lists.newArrayList( );
 	networks.addAll( Lists.transform( input.getGroupNames( ), transformNetworkNames( userFullName ) ) );
@@ -565,6 +589,48 @@ public class VmInstance extends UserMetadata<VmState> implements VmInstanceMetad
 	    }
 	}
 	return networks;
+    }
+    
+    private static void restoreAddress( final VmInfo input, final VmInstance vmInst ) {
+      try {
+        final UserFullName userFullName = UserFullName.getInstance( input.getOwnerId( ) );
+        final Address addr = Addresses.getInstance( ).lookup( input.getNetParams( ).getIgnoredPublicIp( ) );
+        if ( addr.isAssigned( ) &&
+             addr.getInstanceAddress( ).equals( input.getNetParams( ).getIpAddress( ) ) &&
+             addr.getInstanceId( ).equals( input.getInstanceId( ) ) ) {
+          vmInst.updateAddresses( input.getNetParams( ).getIpAddress( ), input.getNetParams( ).getIgnoredPublicIp( ) );
+        } else if ( !addr.isAssigned( ) && addr.isAllocated( ) && ( addr.isSystemOwned( ) || addr.getOwner( ).equals( userFullName ) ) ) {
+          vmInst.updateAddresses( input.getNetParams( ).getIpAddress( ), input.getNetParams( ).getIgnoredPublicIp( ) );
+          if ( addr.isPending() ) try {
+            addr.clearPending();
+          } catch ( Exception e ) {
+          }
+          addr.assign( vmInst ).clearPending();
+        } else { // the public address used by the instance is not available
+          vmInst.updateAddresses( input.getNetParams( ).getIpAddress( ), input.getNetParams( ).getIpAddress() );
+        }
+      } catch ( NoSuchElementException e ) { // Address disabled
+        try {
+            final Address addr = Addresses.getInstance( ).lookupDisabled( input.getNetParams( ).getIgnoredPublicIp( ) );
+            vmInst.updateAddresses( input.getNetParams( ).getIpAddress( ), input.getNetParams( ).getIgnoredPublicIp( ) );
+            addr.pendingAssignment().assign( vmInst ).clearPending();
+
+        } catch ( final Exception ex2 ) {
+            LOG.error( "Failed to restore address state (from disabled) " + input.getNetParams( )
+              + " for instance "
+              + input.getInstanceId( )
+              + " because of: "
+              + ex2.getMessage( ) );
+          Logs.extreme( ).error( ex2, ex2 );
+        }
+      } catch ( final Exception ex2 ) {
+        LOG.error( "Failed to restore address state " + input.getNetParams( )
+                   + " for instance "
+                   + input.getInstanceId( )
+                   + " because of: "
+                   + ex2.getMessage( ) );
+        Logs.extreme( ).error( ex2, ex2 );
+      }
     }
 
     private static byte[] restoreUserData( final VmInfo input ) {
@@ -717,88 +783,133 @@ public class VmInstance extends UserMetadata<VmState> implements VmInstanceMetad
   }
   
   enum Transitions implements Function<VmInstance, VmInstance> {
-    BURIED {
+    REGISTER {
+      @Override
+      public VmInstance apply( final VmInstance arg0 ) {
+        final EntityTransaction db = Entities.get( VmInstance.class );
+        try {
+          final VmInstance entityObj = Entities.merge( arg0 );
+          db.commit( );
+          return entityObj;
+        } catch ( final RuntimeException ex ) {
+          Logs.extreme( ).error( ex, ex );
+          throw ex;
+        } finally {
+          if ( db.isActive() ) db.rollback();
+        }
+      }
+    },
+    START {
       @Override
       public VmInstance apply( final VmInstance v ) {
+        final EntityTransaction db = Entities.get( VmInstance.class );
         try {
-          final VmInstance vm = Entities.uniqueResult( VmInstance.named( null, v.getInstanceId( ) ) );
-          if ( VmState.TERMINATED.apply( vm ) ) {
-            vm.setState( VmState.BURIED );
-          }
+          final VmInstance vm = Entities.merge( v );
+          vm.setState( VmState.PENDING, Reason.USER_STARTED );
+          db.commit( );
           return vm;
-        } catch ( final Exception ex ) {
-          Logs.extreme( ).trace( ex, ex );
-          throw new NoSuchElementException( "Failed to lookup instance: " + v );
+        } catch ( final RuntimeException ex ) {
+          Logs.extreme( ).error( ex, ex );
+          throw ex;
+        } finally {
+          if ( db.isActive() ) db.rollback();
         }
       }
     },
     TERMINATED {
       @Override
       public VmInstance apply( final VmInstance v ) {
+        final EntityTransaction db = Entities.get( VmInstance.class );
         try {
           final VmInstance vm = Entities.uniqueResult( VmInstance.named( null, v.getInstanceId( ) ) );
+          Reason reason = Timeout.UNREPORTED.apply( vm ) ? Reason.EXPIRED : Reason.USER_TERMINATED;
           if ( VmStateSet.RUN.apply( vm ) ) {
-            Reason reason = Timeout.UNREPORTED.apply( vm ) ? Reason.EXPIRED : Reason.USER_TERMINATED;
             vm.setState( VmState.SHUTTING_DOWN, reason );
           } else if ( VmState.SHUTTING_DOWN.equals( vm.getState( ) ) ) {
-            Reason reason = Timeout.SHUTTING_DOWN.apply( vm ) || Reason.EXPIRED.apply( vm ) ?
-                Reason.EXPIRED :
-                Reason.USER_TERMINATED;
             vm.setState( VmState.TERMINATED, reason );
           } else if ( VmState.STOPPED.equals( vm.getState( ) ) ) {
-            vm.setState( VmState.TERMINATED, Reason.USER_TERMINATED );
+            vm.setState( VmState.TERMINATED, reason );
           }
+          db.commit( );
           return vm;
         } catch ( final Exception ex ) {
           Logs.extreme( ).trace( ex, ex );
           throw new NoSuchElementException( "Failed to lookup instance: " + v );
+        } finally {
+          if ( db.isActive() ) db.rollback();
         }
       }
     },
     STOPPED {
       @Override
       public VmInstance apply( final VmInstance v ) {
+        final EntityTransaction db = Entities.get( VmInstance.class );
         try {
           final VmInstance vm = Entities.uniqueResult( VmInstance.named( null, v.getInstanceId( ) ) );
           if ( VmStateSet.RUN.apply( vm ) ) {
             vm.setState( VmState.STOPPING, Reason.USER_STOPPED );
           } else if ( VmState.STOPPING.equals( vm.getState( ) ) ) {
             vm.setState( VmState.STOPPED, Reason.USER_STOPPED );
+            PrivateNetworkIndex vmIdx = vm.getNetworkIndex( );
+            if ( vmIdx != null ) {
+              vmIdx.release( );
+              vmIdx.teardown( );
+              vmIdx = null;
+            }
+            vm.setNetworkIndex( null );
           }
+          db.commit( );
           return vm;
         } catch ( final Exception ex ) {
           Logs.extreme( ).debug( ex, ex );
           throw new NoSuchElementException( "Failed to lookup instance: " + v );
+        } finally {
+          if ( db.isActive() ) db.rollback();
         }
       }
     },
     DELETE {
       @Override
       public VmInstance apply( final VmInstance v ) {
+        final EntityTransaction db = Entities.get( VmInstance.class );
         try {
           final VmInstance vm = Entities.uniqueResult( VmInstance.named( null, v.getInstanceId( ) ) );
+          vm.cleanUp( );
           Entities.delete( vm );
+          db.commit( );
         } catch ( final Exception ex ) {
           LOG.error( ex );
           Logs.extreme( ).error( ex, ex );
+        } finally {
+          if ( db.isActive() ) db.rollback();
         }
-        v.setState( VmState.TERMINATED );
+        try {
+          v.cleanUp( );
+          v.setState( VmState.TERMINATED );
+        } catch ( Exception ex ) {
+          LOG.error( ex );
+          Logs.extreme( ).error( ex, ex );
+        }
         return v;
       }
     },
     SHUTDOWN {
       @Override
       public VmInstance apply( final VmInstance v ) {
+        final EntityTransaction db = Entities.get( VmInstance.class );
         try {
           final VmInstance vm = Entities.uniqueResult( VmInstance.named( null, v.getInstanceId( ) ) );
           if ( VmStateSet.RUN.apply( vm ) ) {
             Reason reason = Timeout.SHUTTING_DOWN.apply( vm ) ? Reason.EXPIRED : Reason.USER_TERMINATED;
             vm.setState( VmState.SHUTTING_DOWN, reason );
           }
+          db.commit( );
           return vm;
         } catch ( final Exception ex ) {
           Logs.extreme( ).debug( ex, ex );
           throw new NoSuchElementException( "Failed to lookup instance: " + v );
+        } finally {
+          if ( db.isActive() ) db.rollback();
         }
       }
     };
@@ -808,14 +919,17 @@ public class VmInstance extends UserMetadata<VmState> implements VmInstanceMetad
   
   enum Lookup implements Function<String, VmInstance> {
     INSTANCE {
-
-      @Nonnull
+      
       @Override
       public VmInstance apply( final String arg0 ) {
         final EntityTransaction db = Entities.get( VmInstance.class );
         try {
           final VmInstance vm = Entities.uniqueResult( VmInstance.named( null, arg0 ) );
           if ( ( vm == null ) ) {
+            throw new NoSuchElementException( "Failed to lookup vm instance: " + arg0 );
+          } else if ( VmStateSet.DONE.apply( vm ) ) {
+            Entities.delete( vm );
+            db.commit( );
             throw new NoSuchElementException( "Failed to lookup vm instance: " + arg0 );
           }
           db.commit( );
@@ -830,8 +944,6 @@ public class VmInstance extends UserMetadata<VmState> implements VmInstanceMetad
         }
       }
     };
-
-    @Nonnull
     @Override
     public abstract VmInstance apply( final String arg0 );
   }
@@ -846,19 +958,8 @@ public class VmInstance extends UserMetadata<VmState> implements VmInstanceMetad
     public VmInstance apply( final ResourceToken token ) {
       final EntityTransaction db = Entities.get( VmInstance.class );
       try {
-        // remove existing persistent terminated instance.
-        try {
-          Entities.delete( Entities.uniqueResult( VmInstance.withUuid( token.getInstanceUuid( ) ) ) );
-          Entities.flush( VmInstance.class );
-        } catch ( NoSuchElementException e ) {
-          // OK, no persistent entity
-        }
-
         final Allocation allocInfo = token.getAllocationInfo( );
-        final VmInstance.Builder builder = new VmInstance.Builder( );
-        VmInstanceLifecycleHelpers.get().prepareVmInstance( token, builder );
-        VmInstance vmInst = builder
-                                                     .owner( allocInfo.getOwnerFullName( ) )
+        VmInstance vmInst = new VmInstance.Builder( ).owner( allocInfo.getOwnerFullName( ) )
                                                      .withIds( token.getInstanceId(),
                                                                allocInfo.getReservationId(),
                                                                allocInfo.getClientToken(),
@@ -871,12 +972,12 @@ public class VmInstance extends UserMetadata<VmState> implements VmInstanceMetad
                                                                   allocInfo.getIamInstanceProfileArn(),
                                                                   allocInfo.getIamInstanceProfileId(),
                                                                   allocInfo.getIamRoleArn() )
-                                                     .placement( allocInfo.getPartition( ) )
-                                                     .networkGroups( allocInfo.getNetworkGroups() )
+                                                     .placement( allocInfo.getPartition( ), allocInfo.getRequest( ).getAvailabilityZone( ) )
+                                                     .networking( allocInfo.getNetworkGroups( ), token.getNetworkIndex( ) )
                                                      .addressing( allocInfo.isUsePrivateAddressing() )
                                                      .expiresOn( allocInfo.getExpiration() )
                                                      .build( token.getLaunchIndex( ) );
-        vmInst.setNaturalId( token.getInstanceUuid( ) );
+        vmInst.setNaturalId(token.getInstanceUuid());
         vmInst = Entities.persist( vmInst );
         Entities.flush( vmInst );
         db.commit( );
@@ -909,11 +1010,10 @@ public class VmInstance extends UserMetadata<VmState> implements VmInstanceMetad
     private VmBootRecord        vmBootRecord;
     private VmPlacement         vmPlacement;
     private List<NetworkGroup>  networkRulesGroups;
-    private Optional<PrivateNetworkIndex> networkIndex = Optional.absent( );
+    private PrivateNetworkIndex networkIndex;
     private Boolean             usePrivateAddressing;
     private OwnerFullName       owner;
     private Date                expiration = new Date( 32503708800000l ); // 3000
-    private List<Callback<VmInstance>> callbacks = Lists.newArrayList( );
     
     public Builder owner( final OwnerFullName owner ) {
       this.owner = owner;
@@ -927,13 +1027,9 @@ public class VmInstance extends UserMetadata<VmState> implements VmInstanceMetad
       return this;
     }
     
-    public Builder networkGroups( final List<NetworkGroup> groups ) {
+    public Builder networking( final List<NetworkGroup> groups, final PrivateNetworkIndex networkIndex ) {
       this.networkRulesGroups = groups;
-      return this;
-    }
-
-    public Builder networkIndex( final PrivateNetworkIndex index ) {
-      this.networkIndex = Optional.fromNullable( index );
+      this.networkIndex = networkIndex;
       return this;
     }
 
@@ -950,7 +1046,7 @@ public class VmInstance extends UserMetadata<VmState> implements VmInstanceMetad
       return this;
     }
     
-    public Builder placement( final Partition partition ) {
+    public Builder placement( final Partition partition, final String clusterName ) {
       final ServiceConfiguration config = Topology.lookup( ClusterController.class, partition );
       this.vmPlacement = new VmPlacement( config.getName( ), config.getPartition( ) );
       return this;
@@ -968,18 +1064,9 @@ public class VmInstance extends UserMetadata<VmState> implements VmInstanceMetad
       return this;
     }
 
-    public Builder onBuild( final Callback<VmInstance> callback ) {
-      callbacks.add( callback );
-      return this;
-    }
-
     public VmInstance build( final Integer launchIndex ) throws ResourceAllocationException {
-      VmInstance instance = new VmInstance( this.owner, this.vmId, this.vmBootRecord, new VmLaunchRecord( launchIndex, new Date( ) ), this.vmPlacement,
+      return new VmInstance( this.owner, this.vmId, this.vmBootRecord, new VmLaunchRecord( launchIndex, new Date( ) ), this.vmPlacement,
                              this.networkRulesGroups, this.networkIndex, this.usePrivateAddressing, this.expiration );
-      for ( final Callback<VmInstance> callback : callbacks ) {
-        callback.fire( instance );
-      }
-      return instance;
     }
   }
   
@@ -989,7 +1076,7 @@ public class VmInstance extends UserMetadata<VmState> implements VmInstanceMetad
                       final VmLaunchRecord launchRecord,
                       final VmPlacement placement,
                       final List<NetworkGroup> networkRulesGroups,
-                      final Optional<PrivateNetworkIndex> networkIndex,
+                      final PrivateNetworkIndex networkIndex,
                       final Boolean usePrivateAddressing,
                       final Date expiration ) throws ResourceAllocationException {
     super( owner, vmId.getInstanceId( ) );
@@ -1006,8 +1093,8 @@ public class VmInstance extends UserMetadata<VmState> implements VmInstanceMetad
     this.networkConfig = new VmNetworkConfig( this, usePrivateAddressing );
     final Function<NetworkGroup, NetworkGroup> func = Entities.merge( );
     this.networkGroups.addAll( Collections2.transform( networkRulesGroups, func ) );
-    this.networkIndex = networkIndex.isPresent( )
-                                                                    ? Entities.merge( networkIndex.get().set( this ) )
+    this.networkIndex = networkIndex != PrivateNetworkIndex.bogus( )
+                                                                    ? Entities.merge( networkIndex.set( this ) )
                                                                     : null;
     this.store( );
   }
@@ -1053,47 +1140,38 @@ public class VmInstance extends UserMetadata<VmState> implements VmInstanceMetad
     this.networkConfig = null;
     this.transientVolumeState = null;
   }
-
-  /**
-   * Clear references that are not valid for a terminated instance
-   */
-  public void clearReferences( ) {
-    bootRecord.setMachine( );
-    bootRecord.setKernel( );
-    bootRecord.setRamdisk( );
-    clearRunReferences( );
+  
+  public void updateBlockBytes( final long blkbytes ) {
+    this.usageStats.setBlockBytes( blkbytes );
   }
-
-  /**
-   * Clear any references that are not valid for a stopped instance
-   */
-  public void clearRunReferences( ) {
-    runtimeState.clearServiceTag( );
+  
+  public void updateNetworkBytes( final long netbytes ) {
+    this.usageStats.setNetworkBytes( netbytes );
   }
-
-  public void clearPublicAddress( ) {
-    updatePublicAddress( null );
-  }
-
+  
   public void updateAddresses( final String privateAddr, final String publicAddr ) {
     this.updatePrivateAddress( privateAddr );
     this.updatePublicAddress( publicAddr );
   }
-
+  
   public void updatePublicAddress( final String publicAddr ) {
-    this.getNetworkConfig( ).setPublicAddress( VmNetworkConfig.ipOrDefault( publicAddr ) );
+    if ( !VmNetworkConfig.DEFAULT_IP.equals( publicAddr ) && !"".equals( publicAddr ) && ( publicAddr != null ) ) {
+      this.getNetworkConfig( ).setPublicAddress( publicAddr );
+    } else if ( VmState.STOPPED.equals(this.getState( ) ) ) {
+        this.getNetworkConfig( ).setPublicAddress( publicAddr );
+    } else {
+        this.getNetworkConfig( ).setPublicAddress( VmNetworkConfig.DEFAULT_IP );
+    }
     this.getNetworkConfig( ).updateDns( );
   }
   
   public void updatePrivateAddress( final String privateAddr ) {
-    this.getNetworkConfig( ).setPrivateAddress( VmNetworkConfig.ipOrDefault( privateAddr ) );
-    this.getNetworkConfig( ).updateDns( );
-  }
-
-  public void updateMacAddress( final String macAddress ) {
-    if ( getMacAddress( ) == null ) {
-      getNetworkConfig().setMacAddress( macAddress );
+    if ( !VmNetworkConfig.DEFAULT_IP.equals( privateAddr ) && !"".equals( privateAddr ) && ( privateAddr != null ) ) {
+      this.getNetworkConfig( ).setPrivateAddress( privateAddr );
+    } else if ( VmState.STOPPED.equals(this.getState( ) ) ) {
+        this.getNetworkConfig( ).setPrivateAddress( privateAddr );
     }
+    this.getNetworkConfig( ).updateDns( );
   }
   
   public VmRuntimeState getRuntimeState( ) {
@@ -1102,7 +1180,7 @@ public class VmInstance extends UserMetadata<VmState> implements VmInstanceMetad
     }
     return this.runtimeState;
   }
-
+  
   private void setRuntimeState( final VmState state ) {
     this.setState( state, Reason.NORMAL );
   }
@@ -1144,7 +1222,7 @@ public class VmInstance extends UserMetadata<VmState> implements VmInstanceMetad
             Accounts.lookupUserById(userId).getName(),
             accountId,
             Accounts.lookupAccountById(accountId).getName(),
-            this.placement.getPartitionName()));
+            this.placement.getPartitionName())); //TODO Add CPU and network utilization
       } catch ( final Exception ex ) {
         LOG.error( ex, ex );
       }
@@ -1215,7 +1293,7 @@ public class VmInstance extends UserMetadata<VmState> implements VmInstanceMetad
     if ( this.getRamdiskId( ) != null ) {
       m.put( "ramdisk-id", this.getRamdiskId( ) );
     }
-    m.put( "security-groups", Joiner.on('\n').join( Sets.newTreeSet( Iterables.transform( getNetworkGroups(), CloudMetadatas.toDisplayName() ) ) ) );
+    m.put( "security-groups", Joiner.on('\n').join( this.getNetworkNames( ) ) );
     m.put( "placement/availability-zone", this.getPartition( ) );
     return m;
   }
@@ -1244,7 +1322,7 @@ public class VmInstance extends UserMetadata<VmState> implements VmInstanceMetad
 
       // Using ephemeral attachments for bfebs instances only, can be extended to be used by all other instances
       // Get all the ephemeral attachments and order them in some way (by device name for now)
-      Set<VmEphemeralAttachment> ephemeralAttachments = new TreeSet<VmEphemeralAttachment>(this.bootRecord.getEphemeralStorage());
+      Set<VmEphemeralAttachment> ephemeralAttachments = new TreeSet<VmEphemeralAttachment>(this.bootRecord.getEphmeralStorage());
 
       // Iterate through the list of ephemeral attachments and populate ephemeral mappings
       if (!ephemeralAttachments.isEmpty()) {
@@ -1300,9 +1378,10 @@ public class VmInstance extends UserMetadata<VmState> implements VmInstanceMetad
       if ( roleArn != null ) {
         final AssumeRoleType assumeRoleType = new AssumeRoleType( );
         assumeRoleType.setRoleArn(roleArn);
-        assumeRoleType.setRoleSessionName(Crypto.generateId( this.getOwner().getUserId() ));
+        assumeRoleType.setRoleSessionName(Crypto.generateId(roleArn, this.getOwner().getUserId()));
 
-        ServiceConfiguration serviceConfiguration = Topology.lookup(Tokens.class);
+        ServiceConfiguration serviceConfiguration = ServiceConfigurations
+            .createEphemeral(ComponentIds.lookup(Tokens.class));
         try {
           credentials = ((AssumeRoleResponseType) AsyncRequests.sendSync(serviceConfiguration, assumeRoleType))
               .getAssumeRoleResult().getCredentials();
@@ -1368,17 +1447,17 @@ public class VmInstance extends UserMetadata<VmState> implements VmInstanceMetad
   }
   
   public String getImageId( ) {
-    return this.bootRecord.getDisplayMachineImageId();
+    return this.bootRecord.getMachine( ) == null ? "emi-00000000" : this.bootRecord.getMachine( ).getDisplayName( );
   }
 
   @Nullable
   public String getRamdiskId( ) {
-    return this.bootRecord.getDisplayRamdiskImageId();
+    return CloudMetadatas.toDisplayName().apply( this.bootRecord.getRamdisk( ) );
   }
 
   @Nullable
   public String getKernelId( ) {
-    return this.bootRecord.getDisplayKernelImageId();
+    return CloudMetadatas.toDisplayName().apply(  this.bootRecord.getKernel( ) );
   }
   
   public boolean hasPublicAddress( ) {
@@ -1391,10 +1470,40 @@ public class VmInstance extends UserMetadata<VmState> implements VmInstanceMetad
     return super.getDisplayName( );
   }
   
+  public String getConsoleOutputString( ) {
+    return new String( Base64.encode( this.getRuntimeState( ).getConsoleOutput( ).toString( ).getBytes( ) ) );
+  }
+  
+  public void setConsoleOutput( final StringBuffer consoleOutput ) {
+    this.getRuntimeState( ).setConsoleOutput( consoleOutput );
+  }
+  
   public VmType getVmType( ) {
     return this.bootRecord.getVmType( );
   }
   
+  public NavigableSet<String> getNetworkNames( ) {
+    return new TreeSet<String>( Collections2.transform( this.getNetworkGroups( ), new Function<NetworkGroup, String>( ) {
+      
+      @Override
+      public String apply( final NetworkGroup arg0 ) {
+        return arg0.getDisplayName( );
+      }
+    } ) );
+  }
+
+  public TreeMap<String,String> getNetworkMap( ) { //A map that contains the security group name and id
+
+    TreeMap<String,String> networkGroupMap = Maps.newTreeMap();
+
+    for (NetworkGroup networkGroup : this.getNetworkGroups( ) ) {
+      networkGroupMap.put(networkGroup.getGroupId(), networkGroup.getDisplayName());
+    }
+
+    return networkGroupMap;
+  }
+
+
   public boolean isUsePrivateAddressing() {
     // allow for null value
     return Boolean.TRUE.equals( this.getNetworkConfig( ).getUsePrivateAddressing( ) );
@@ -1415,16 +1524,12 @@ public class VmInstance extends UserMetadata<VmState> implements VmInstanceMetad
   public String getPublicDnsName( ) {
     return this.getNetworkConfig( ).getPublicDnsName( );
   }
-
-  public String getMacAddress( ) {
-    return this.getNetworkConfig( ).getMacAddress( );
-  }
-
+  
   public String getPasswordData( ) {
     return this.getRuntimeState( ).getPasswordData( );
   }
   
-  public void updatePasswordData( final String passwordData ) {
+  public void setPasswordData( final String passwordData ) {
     this.getRuntimeState( ).setPasswordData( passwordData );
   }
   
@@ -1432,13 +1537,27 @@ public class VmInstance extends UserMetadata<VmState> implements VmInstanceMetad
    * @return the platform
    */
   public String getPlatform( ) {
-    return this.bootRecord.getPlatform( ).toString( );
+    return this.bootRecord.getPlatform( );
   }
 
   public String getDisplayPlatform( ) {
-    return Platform.windows == this.bootRecord.getPlatform( ) ?
+    return Platform.windows.name().equals( getPlatform() ) ?
         Platform.windows.name() :
         "";
+  }
+  
+  /**
+   * @return the networkBytes
+   */
+  public Long getNetworkBytes( ) {
+    return this.usageStats.getNetworkBytes( );
+  }
+  
+  /**
+   * @return the blockBytes
+   */
+  public Long getBlockBytes( ) {
+    return this.usageStats.getBlockBytes( );
   }
   
   @Override
@@ -1462,12 +1581,19 @@ public class VmInstance extends UserMetadata<VmState> implements VmInstanceMetad
     return new VmInstance( ownerFullName, new VmId( null, null, clientToken, null ) );
   }
 
-  public static VmInstance withUuid( final String uuid ) {
-    final VmInstance example = new VmInstance( );
-    example.setNaturalId( uuid );
-    return example;
+  public static VmInstance namedTerminated( final OwnerFullName ownerFullName, final String instanceId ) {
+    return new VmInstance( ownerFullName, instanceId ) {
+      /**
+       * 
+       */
+      private static final long serialVersionUID = 1L;
+      
+      {
+        this.setState( VmState.TERMINATED );
+      }
+    };
   }
-
+  
   @Override
   public FullName getFullName( ) {
     return FullName.create.vendor( "euca" )
@@ -1503,8 +1629,18 @@ public class VmInstance extends UserMetadata<VmState> implements VmInstanceMetad
     }
   }
   
-  public PrivateNetworkIndex getNetworkIndex( ) {
+  PrivateNetworkIndex getNetworkIndex( ) {
     return this.networkIndex;
+  }
+  
+  public void releaseNetworkIndex( ) {
+    try {
+      this.networkIndex.release( );
+      
+    } catch ( final ResourceAllocationException ex ) {
+      LOG.trace( ex, ex );
+      LOG.error( ex );
+    }
   }
   
   private Boolean getPrivateNetwork( ) {
@@ -1519,11 +1655,6 @@ public class VmInstance extends UserMetadata<VmState> implements VmInstanceMetad
     return ( Set<NetworkGroup> ) ( this.networkGroups != null
                                                              ? this.networkGroups
                                                              : Sets.newHashSet( ) );
-  }
-
-  public Set<NetworkGroupId> getNetworkGroupIds( ) {
-    updateGroups( );
-    return this.networkGroupIds;
   }
   
   static long getSerialversionuid( ) {
@@ -1574,7 +1705,11 @@ public class VmInstance extends UserMetadata<VmState> implements VmInstanceMetad
     final EntityTransaction db = Entities.get( VmInstance.class );
     try {
       final VmInstance entity = Entities.merge( this );
+      VmInstances.initialize( ).apply( entity );
       entity.runtimeState.setState( stopping, reason, extra );
+      if ( VmStateSet.DONE.apply( entity ) ) {
+        entity.cleanUp( );
+      }
       db.commit( );
     } catch ( final Exception ex ) {
       Logs.extreme( ).error( ex, ex );
@@ -1702,19 +1837,88 @@ public class VmInstance extends UserMetadata<VmState> implements VmInstanceMetad
     Entities.asTransaction( VmInstance.class, attachmentFunction, VmInstances.TX_RETRIES ).apply( vol );
   }
   
+  // Added for EUCA-6935. Persistent volume attachments have to be removed one by one within their own transaction.
+  // DO NOT invoke this method within a transaction as it might result in  OptimisticLockException or StaleObjectException
+  public void removePersistentVolumeAttachment (final VmVolumeAttachment attachment) {
+    final Function<VmVolumeAttachment, Boolean> attachmentFunction = new Function<VmVolumeAttachment, Boolean>() {
+	  public Boolean apply(VmVolumeAttachment arg0) {
+		final VmInstance vm = Entities.merge(VmInstance.this);
+	    Volume volume = Volumes.lookup( null, arg0.getVolumeId());
+	    if (arg0.getDeleteOnTerminate()) {
+  		  try {
+  		    final ServiceConfiguration sc = Topology.lookup(Storage.class, vm.lookupPartition());
+  		    try {
+  		      DeleteStorageVolumeResponseType reply = AsyncRequests.sendSync( sc, new DeleteStorageVolumeType(arg0.getVolumeId()));
+  		      if(null != reply && reply.get_return()) {
+                Volumes.annihilateStorageVolume(volume);
+  		      } else {
+  		        LOG.error(arg0.getVolumeId() + ": Failed to delete volume.");
+    		  }
+  		    } catch (Exception ex) {
+  		      LOG.error(arg0.getVolumeId() + ": Failed to delete volume.", ex);
+  		    }
+  		  } catch ( Exception ex ) {
+  		    LOG.error(arg0.getVolumeId() + "Failed to lookup volume", ex);
+  		  }
+	    }
+	    return vm.getBootRecord().getPersistentVolumes().remove(arg0);
+	  } 
+    };
+	Entities.asTransaction(VmInstance.class, attachmentFunction, VmInstances.TX_RETRIES).apply(attachment);
+  }
+  
+  public void removeTransientVolumeAttachment (final VmVolumeAttachment attachment) {
+	final Function<VmVolumeAttachment, Boolean> attachmentFunction = new Function<VmVolumeAttachment, Boolean>() {
+	  public Boolean apply(VmVolumeAttachment arg0) {
+	    final VmInstance vm = Entities.merge( VmInstance.this );
+	    final Volume volume = Volumes.lookup( null, arg0.getVolumeId() );
+	    try {
+	      vm.transientVolumeState.removeVolumeAttachment(arg0.getVolumeId());
+		} catch (NoSuchElementException ex) {
+		  LOG.debug(arg0.getVolumeId() + ": Unable to find volume attachment. Nothing to remove", ex);
+		}
+	    if ( State.BUSY.equals( volume.getState( ) ) ) {
+	      volume.setState( State.EXTANT );
+	    }
+	    return true;
+	  } 
+	};
+    Entities.asTransaction( VmInstance.class, attachmentFunction, VmInstances.TX_RETRIES).apply(attachment);
+  }
+  
   // Creates a DB entity associated with ephemeral devices for boot from ebs instances and stores it in the boot record
   public void addEphemeralAttachment( final String deviceName, final String ephemeralId ) {
     final Function<String, String> attachmentFunction = new Function<String, String>( ) {
 	  public String apply( final String input ) {
 	    final VmInstance entity = Entities.merge( VmInstance.this );
 	    final VmEphemeralAttachment ephemeralAttachment = new VmEphemeralAttachment( entity, ephemeralId, deviceName );
-	    entity.bootRecord.getEphemeralStorage().add(ephemeralAttachment);
+	    entity.bootRecord.getEphmeralStorage().add(ephemeralAttachment);
 	    return input;
       }
     };
     Entities.asTransaction( VmInstance.class, attachmentFunction, VmInstances.TX_RETRIES ).apply( ephemeralId );
   }
-
+  
+  // Update the volume attachment and volume records to reflect the remote device string
+  public void updatePersistantVolume( final String remoteDevice, final Volume vol ) {
+	final EntityTransaction db = Entities.get( VmInstance.class );
+	VmInstance instanceEntity = Entities.merge( this );
+	Volume volEntity = Entities.merge( vol );
+	try {
+	  final Set<VmVolumeAttachment> attachments = instanceEntity.bootRecord.getPersistentVolumes();
+	  for (VmVolumeAttachment attachment : attachments ) {
+	    if (attachment.getVolumeId().equals(volEntity.getDisplayName())) {
+	      attachment.setRemoteDevice(remoteDevice);
+	      break;
+	    }
+	  }
+	  volEntity.setRemoteDevice(remoteDevice);
+	  db.commit( );
+	} catch ( final Exception ex ) {
+	  Logs.extreme( ).error( ex, ex );
+	  db.rollback( );
+    } 
+  }
   /**
    *
    */
@@ -1832,15 +2036,16 @@ public class VmInstance extends UserMetadata<VmState> implements VmInstanceMetad
               this.updateState( runVm );
             } else if ( VmState.SHUTTING_DOWN.apply( VmInstance.this ) && VmState.SHUTTING_DOWN.equals( runVmState ) ) {
               VmInstance.this.setState( VmState.TERMINATED, Reason.APPEND, "DONE" );
-            } else if ( VmInstances.Timeout.SHUTTING_DOWN.apply( VmInstance.this ) ) {
+            } else if ( VmState.SHUTTING_DOWN.apply( VmInstance.this ) && VmInstances.Timeout.SHUTTING_DOWN.apply( VmInstance.this ) ) {
               VmInstance.this.setState( VmState.TERMINATED, Reason.EXPIRED );
-            } else if ( VmInstances.Timeout.STOPPING.apply( VmInstance.this ) ) {
+            } else if ( VmState.STOPPING.apply( VmInstance.this ) && VmInstances.Timeout.SHUTTING_DOWN.apply( VmInstance.this ) ) {
               VmInstance.this.setState( VmState.STOPPED, Reason.EXPIRED );
             } else if ( VmStateSet.NOT_RUNNING.apply( VmInstance.this ) && VmStateSet.RUN.contains( runVmState ) ) {
               VmInstance.this.setState( VmState.RUNNING, Reason.APPEND, "MISMATCHED" );
             } else {
               this.updateState( runVm );
             }
+            //VmInstance.this.fireUsageEvent( );
             db.commit( );
           } catch ( final Exception ex ) {
             Logs.extreme( ).error( ex, ex );
@@ -1853,22 +2058,14 @@ public class VmInstance extends UserMetadata<VmState> implements VmInstanceMetad
       
       private void updateState( final VmInfo runVm ) {
         VmInstance.this.getRuntimeState( ).updateBundleTaskState( runVm.getBundleTaskStateName( ) );
-        VmInstance.this.setServiceTag( runVm.getServiceTag( ) );
+        VmInstance.this.getRuntimeState( ).setServiceTag( runVm.getServiceTag( ) );
+        VmInstance.this.updateAddresses( runVm.getNetParams( ).getIpAddress( ), runVm.getNetParams( ).getIgnoredPublicIp( ) );
         VmInstance.this.getRuntimeState( ).setGuestState(runVm.getGuestStateName());
-        if ( VmStateSet.RUN.apply( VmInstance.this ) ) {
-          if ( !EdgeNetworking.isEnabled( ) ) {
-            VmInstance.this.updateAddresses( runVm.getNetParams( ).getIpAddress( ), runVm.getNetParams( ).getIgnoredPublicIp( ) );
-          }
-        }
         if ( VmState.RUNNING.apply( VmInstance.this ) ) {
           VmInstance.this.updateVolumeAttachments( runVm.getVolumes( ) );
-          VmInstance.this.updateMigrationTaskState(
-              runVm.getMigrationStateName( ),
-              Strings.nullToEmpty( runVm.getMigrationSource() ),
-              Strings.nullToEmpty( runVm.getMigrationDestination() ) );
-        }
-        if ( VmInstances.Timeout.UNTOUCHED.apply( VmInstance.this ) ) {
-          VmInstance.this.updateTimeStamps();
+          VmInstance.this.updateBlockBytes( runVm.getBlockBytes( ) );
+          VmInstance.this.updateNetworkBytes( runVm.getNetworkBytes( ) );
+          VmInstance.this.updateMigrationTaskState( runVm.getMigrationStateName( ), runVm.getMigrationSource( ), runVm.getMigrationDestination( )  );
         }
       }
     };
@@ -1911,49 +2108,34 @@ public class VmInstance extends UserMetadata<VmState> implements VmInstanceMetad
     this.networkIndex = networkIndex;
   }
 
-  /**
-   * Get the state suitable for EC2 API.
-   *
-   * @see #getState
-   */
-  VmState getDisplayState( ) {
-    return getState( ).getDisplayState( );
+  VmState getDisplayState() {
+ 	  return getState( );
   }
 
-  @Nonnull
   String getDisplayPublicDnsName( ) {
-    return VmStateSet.TORNDOWN.apply( this ) ?
-        "" :
-        dns() ?
-            getPublicDnsName( ) :
-            getDisplayPublicAddress( );
+    return dns() ?
+        Objects.firstNonNull( getPublicDnsName( ), VmNetworkConfig.DEFAULT_IP ) :
+        getDisplayPublicAddress( );
   }
 
-  @Nonnull
   String getDisplayPublicAddress( ) {
-    return VmStateSet.TORNDOWN.apply( this ) ?
-        "" :
-        VmNetworkConfig.DEFAULT_IP.equals( Objects.firstNonNull( Strings.emptyToNull( getPublicAddress( ) ), VmNetworkConfig.DEFAULT_IP ) ) ?
+    return dns() ?
+        getPublicAddress( ) :
+        VmNetworkConfig.DEFAULT_IP.equals( Objects.firstNonNull( getPublicAddress( ), VmNetworkConfig.DEFAULT_IP ) ) ?
             getDisplayPrivateAddress( ) :
-            getPublicAddress( );
+            Objects.firstNonNull( getPublicAddress( ), VmNetworkConfig.DEFAULT_IP );
   }
 
-  @Nonnull
   String getDisplayPrivateDnsName( ) {
-    return VmStateSet.TORNDOWN.apply( this ) ?
-        "" :
-        dns() ?
-            getPrivateDnsName( ) :
-            getDisplayPrivateAddress( );
+    return dns() ?
+      Objects.firstNonNull( getPrivateDnsName( ), VmNetworkConfig.DEFAULT_IP ) :
+      getDisplayPrivateAddress( );
   }
 
-  @Nonnull
   String getDisplayPrivateAddress( ) {
-    return VmStateSet.TORNDOWN.apply( this ) ?
-        "" :
-        VmNetworkConfig.DEFAULT_IP.equals( Objects.firstNonNull( Strings.emptyToNull( getPrivateAddress( ) ), VmNetworkConfig.DEFAULT_IP ) ) ?
-            VmNetworkConfig.DEFAULT_IP :
-            getPrivateAddress( );
+    return dns() ?
+        getPrivateAddress( ) :
+        Objects.firstNonNull( getPrivateAddress( ), VmNetworkConfig.DEFAULT_IP );
   }
 
   private static boolean dns( ) {
@@ -1992,9 +2174,9 @@ public class VmInstance extends UserMetadata<VmState> implements VmInstanceMetad
           runningInstance.setRamdisk( input.getRamdiskId() );
           runningInstance.setPlatform( Strings.emptyToNull( input.getDisplayPlatform() ) );
           runningInstance.setDnsName( input.getDisplayPublicDnsName() );
-          runningInstance.setIpAddress( Strings.emptyToNull( input.getDisplayPublicAddress() ) );
+          runningInstance.setIpAddress( input.getDisplayPublicAddress() );
           runningInstance.setPrivateDnsName( input.getDisplayPrivateDnsName() );
-          runningInstance.setPrivateIpAddress( Strings.emptyToNull( input.getDisplayPrivateAddress() ) );
+          runningInstance.setPrivateIpAddress( input.getDisplayPrivateAddress() );
 
           runningInstance.setReason( input.runtimeState.getReason( ) );
           if ( input.getBootRecord( ).getSshKeyPair( ) != null ) {
@@ -2059,12 +2241,7 @@ public class VmInstance extends UserMetadata<VmState> implements VmInstanceMetad
             runningInstance.setMonitoring("disabled");  
           }
           
-          runningInstance.getGroupSet( ).addAll( Collections2.transform( 
-             input.getNetworkGroupIds( ),
-              TypeMappers.lookup( NetworkGroupId.class, GroupItemType.class ) ) );
-          Collections.sort( runningInstance.getGroupSet( ) );
-
-          runningInstance.setVirtualizationType( input.getVirtualizationType( ) );
+          runningInstance.setVirtualizationType(input.getVirtulizationType());
           
           if ( input.isBlockStorage( ) ) {
             runningInstance.setRootDeviceType( ROOT_DEVICE_TYPE_EBS );
@@ -2077,7 +2254,7 @@ public class VmInstance extends UserMetadata<VmState> implements VmInstanceMetad
                                                                                       attachedVol.getAttachTime( ),
                                                                                       attachedVol.getDeleteOnTerminate( ) ) );
               if( attachedVol.getIsRootDevice() ) {
-            	runningInstance.setRootDeviceName(attachedVol.getDevice());
+            	runningInstance.setRootDeviceName(attachedVol.getDevice());	  
               }
             }
           }
@@ -2108,49 +2285,18 @@ public class VmInstance extends UserMetadata<VmState> implements VmInstanceMetad
       return new ReservationInfoType(
           instance.getReservationId( ),
           instance.getOwner( ).getAccountNumber( ),
-          Collections2.transform( instance.getNetworkGroupIds(), TypeMappers.lookup( NetworkGroupId.class, GroupItemType.class ) ) );
+          CollectionUtils.putAll(
+              instance.getNetworkGroups(),
+              Maps.<String, String>newTreeMap(),
+              NetworkGroups.groupId(),
+              RestrictedTypes.toDisplayName() ) );
     }
   }
 
-  @TypeMapper
-  public enum NetworkGroupIdTransform implements Function<NetworkGroup,NetworkGroupId> {
-    INSTANCE;
-
-    @Override
-    public NetworkGroupId apply( final NetworkGroup networkGroup ) {
-      return new NetworkGroupId(
-        networkGroup.getGroupId(),
-        networkGroup.getName()
-      );
-    }
+  public boolean isLinux( ) {
+    return this.bootRecord.isLinux( );
   }
-
-  @TypeMapper
-  public enum NetworkGroupIdToGroupItemTypeTransform implements Function<NetworkGroupId,GroupItemType> {
-    INSTANCE;
-
-    @Override
-    public GroupItemType apply( final NetworkGroupId networkGroupId ) {
-      return new GroupItemType(
-          networkGroupId.getGroupId( ),
-          networkGroupId.getGroupName()
-      );
-    }
-  }
-
-  @TypeMapper
-  public enum NetworkGroupToGroupItemTypeTransform implements Function<NetworkGroup,GroupItemType> {
-    INSTANCE;
-
-    @Override
-    public GroupItemType apply( final NetworkGroup networkGroupId ) {
-      return new GroupItemType(
-          networkGroupId.getGroupId( ),
-          networkGroupId.getName()
-      );
-    }
-  }
-
+  
   public boolean isBlockStorage( ) {
     return this.bootRecord.isBlockStorage( );
   }
@@ -2250,8 +2396,23 @@ public class VmInstance extends UserMetadata<VmState> implements VmInstanceMetad
     }
   }
   
-  public String getVirtualizationType( ) {
-    return this.getBootRecord( ).getDisplayVirtualizationType( ).toString( );
+  public String getVirtulizationType( ) {
+	  try{
+		  final BootableImageInfo emi = this.getBootRecord().getMachine();
+		  final ImageMetadata.VirtualizationType virtType = emi.getVirtualizationType();
+		  if(virtType!=null)
+			  return virtType.toString();
+		  else{
+			  if(emi instanceof BlockStorageImageInfo || ImageMetadata.Platform.windows.equals(emi.getPlatform()))
+				  return ImageMetadata.VirtualizationType.hvm.toString();
+			  else
+				  return ImageMetadata.VirtualizationType.paravirtualized.toString();
+			  
+		  }
+	  }catch( final Exception ex){
+		  return ImageMetadata.VirtualizationType.paravirtualized.toString();
+	  }
+	  
   }
   
   @Override
@@ -2366,13 +2527,6 @@ public class VmInstance extends UserMetadata<VmState> implements VmInstanceMetad
     return this.runtimeState.getMigrationTask( );
   }
 
-  @PrePersist
-  @PreUpdate
-  private void updateGroups( ) {
-    CollectionUtils.fluent( networkGroups )
-        .transform( TypeMappers.lookup( NetworkGroup.class, NetworkGroupId.class ) )
-        .copyInto( networkGroupIds );
-  }
 
   private enum MetadataGroup implements Function<VmInstance,Map<String,String>> {
     Core {
@@ -2529,7 +2683,7 @@ public class VmInstance extends UserMetadata<VmState> implements VmInstanceMetad
         for ( VmInstance vm : instances ) {
           if( vm.getBootRecord().getMachine() instanceof BlockStorageImageInfo ) {
         	LOG.info( "Upgrading bfebs VmInstance: " + vm.toString() );
-        	if( vm.getBootRecord().getEphemeralStorage().isEmpty() ) {
+        	if( vm.getBootRecord().getEphmeralStorage().isEmpty() ) {
         	  LOG.info("Adding ephemeral disk at /dev/sdb");
         	  vm.addEphemeralAttachment("/dev/sdb", "ephemeral0");	
         	}

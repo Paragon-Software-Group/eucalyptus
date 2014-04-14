@@ -23,8 +23,11 @@ import java.util.NoSuchElementException;
 import java.util.concurrent.ExecutionException;
 import javax.annotation.Nonnull;
 import javax.annotation.Nullable;
+import com.eucalyptus.bootstrap.BootstrapArgs;
 import com.eucalyptus.component.ComponentId;
+import com.eucalyptus.component.ComponentIds;
 import com.eucalyptus.component.ServiceConfiguration;
+import com.eucalyptus.component.ServiceConfigurations;
 import com.eucalyptus.component.Topology;
 import com.eucalyptus.util.async.AsyncRequests;
 import com.eucalyptus.util.concurrent.ListenableFuture;
@@ -51,7 +54,13 @@ public class DispatchingClient<MT extends BaseMessage,CT extends ComponentId> {
 
   public void init() throws DispatchingClientException {
     try {
-      this.configuration = Topology.lookup( componentIdClass );
+      final ComponentId componentId = ComponentIds.lookup( componentIdClass );
+      if ( componentId.isAlwaysLocal() ||
+           ( BootstrapArgs.isCloudController() && componentId.isCloudLocal() && !componentId.isRegisterable() ) ) {
+        this.configuration = ServiceConfigurations.createEphemeral( componentId );
+      } else {
+        this.configuration = Topology.lookup( componentIdClass );
+      }
     } catch ( final NoSuchElementException e ) {
       throw new DispatchingClientException( e );
     }
@@ -66,8 +75,7 @@ public class DispatchingClient<MT extends BaseMessage,CT extends ComponentId> {
    void dispatch( final REQ request,
                  final Callback.Checked<RES> callback,
                  @Nullable final Runnable then ) {
-    request.setUserId( userId );
-    request.markPrivileged( );
+    request.setEffectiveUserId( userId );
     try {
       final ListenableFuture<RES> future =
           AsyncRequests.dispatch( configuration, request );

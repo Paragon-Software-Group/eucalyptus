@@ -90,6 +90,11 @@ public class ComponentType extends EucalyptusData {
   }
   public ComponentType( ) {
   }
+  public ServiceConfiguration toConfiguration() {
+    URI realUri = URI.create( this.getUri( ) );
+    final ComponentId c = ComponentId.lookup( component );
+    return ServiceConfigurations.createEphemeral( name, c, realUri );
+  }
 }
 public class ComponentProperty extends EucalyptusData {
   private String type;
@@ -365,7 +370,7 @@ public class VmTypeInfo extends EucalyptusData implements Cloneable {
   def VmTypeInfo(){
   }
   
-  def VmTypeInfo(String name, Integer memory, Integer disk, Integer cores, String rootDevice ) {
+  def VmTypeInfo(final name, final memory, final disk, final cores, final rootDevice ) {
     this.name = name;
     this.memory = memory;
     this.disk = disk;
@@ -376,7 +381,7 @@ public class VmTypeInfo extends EucalyptusData implements Cloneable {
   public VmTypeInfo child( ) {
     VmTypeInfo child = new VmTypeInfo( this.name, this.memory, this.disk, this.cores, this.rootDeviceName );
     child.deviceMappings.addAll( this.deviceMappings );
-    child.virtualBootRecord.addAll( this.virtualBootRecord.collect{ VirtualBootRecord it -> it.clone() } );
+    child.virtualBootRecord.addAll( this.virtualBootRecord.collect{ (VirtualBootRecord) it.clone() } );
     return child;
   }
   
@@ -401,15 +406,15 @@ public class VmTypeInfo extends EucalyptusData implements Cloneable {
   }
   
   public void setRoot( String imageId, String location, Long sizeBytes ) {
-    this.virtualBootRecord.add( new VirtualBootRecord( id : imageId, size : sizeBytes, resourceLocation : location, guestDeviceName : this.rootDeviceName, type : "machine" ) );
+    this.virtualBootRecord.add( new VirtualBootRecord( id : imageId, size : sizeBytes, resourceLocation : "walrus://${location}", guestDeviceName : this.rootDeviceName, type : "machine" ) );
   }
   
   public void setKernel( String imageId, String location ) {
-    this.virtualBootRecord.add( new VirtualBootRecord( id : imageId, resourceLocation : location, type : "kernel" ) );
+    this.virtualBootRecord.add( new VirtualBootRecord( id : imageId, resourceLocation : "walrus://${location}", type : "kernel" ) );
   }
   
   public void setRamdisk( String imageId, String location ) {
-    this.virtualBootRecord.add( new VirtualBootRecord( id : imageId, resourceLocation : location, type : "ramdisk" ) );
+    this.virtualBootRecord.add( new VirtualBootRecord( id : imageId, resourceLocation : "walrus://${location}", type : "ramdisk" ) );
   }
   
   protected void setSwap( String deviceName, Long sizeBytes ) {
@@ -518,7 +523,7 @@ public class PacketFilterRule extends EucalyptusData {
   ArrayList<String> sourceNetworkNames = new ArrayList<String>();
   ArrayList<String> sourceUserNames = new ArrayList<String>();
   
-  def PacketFilterRule(String destUserName, String destNetworkName, String protocol, int portMin, int portMax) {
+  def PacketFilterRule(final destUserName, final destNetworkName, final protocol, final portMin, final portMax) {
     this.destUserName = destUserName;
     this.destNetworkName = destNetworkName;
     this.protocol = protocol;

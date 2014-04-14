@@ -34,7 +34,7 @@
                    address="http://127.0.0.1:8773/services/Imaging"/>
     <euca:endpoint name="ImagingInternalWS"
                    connector-ref="eucaws"
-                   address="http://127.0.0.1:8773/internal/Imaging"
+                   address="http://127.0.0.1:8773/internal/ImagingInternal"
                    exchange-pattern="request-response"/>
 
     <endpoint name="ImagingWS" address="vm://Imaging" exchange-pattern="one-way"/>
@@ -53,7 +53,7 @@
             <outbound>
                 <filtering-router>
                     <outbound-endpoint ref="ImagingWS" />
-                    <payload-type-filter expectedType="com.eucalyptus.imaging.ImagingMessage" />
+                    <payload-type-filter expectedType="com.eucalyptus.images.ImagingMessage" />
                 </filtering-router>
             </outbound>
         </service>
@@ -62,11 +62,11 @@
             <inbound>
                 <inbound-endpoint ref="ImagingWS" />
             </inbound>
-            <component class="com.eucalyptus.imaging.ImagingService" />
+            <component class="com.eucalyptus.images.ImagingService" />
             <outbound>
                 <filtering-router>
                     <outbound-endpoint ref="ReplyQueueEndpoint" />
-                    <payload-type-filter expectedType="com.eucalyptus.imaging.ImagingMessage" />
+                    <payload-type-filter expectedType="com.eucalyptus.images.ImagingMessage" />
                 </filtering-router>
             </outbound>
         </service>
@@ -75,7 +75,7 @@
             <inbound>
                 <inbound-endpoint ref="ImagingErrorQueueWS" />
             </inbound>
-            <component class="com.eucalyptus.imaging.ws.ImagingErrorHandler" />
+            <component class="com.eucalyptus.images.ImagingErrorHandler" />
         </service>
 
     </model>
@@ -85,7 +85,7 @@
                 <inbound-endpoint ref="ImagingInternalWS" />
                 <inbound-endpoint ref="ImagingInternalVM" />
             </inbound>
-            <component class="com.eucalyptus.imaging.ImagingService" />
+            <component class="com.eucalyptus.images.ImagingService" />
         </service>
     </model>
 

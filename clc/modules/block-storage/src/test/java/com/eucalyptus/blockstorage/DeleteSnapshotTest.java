@@ -91,6 +91,13 @@ public class DeleteSnapshotTest {
         while(true);
     }
 
+  @Test
+  public void testWalrusDeleteSnapshot() throws Exception {
+
+        String snapshotId = "snap-zVl2kZJmjhxnEg..";
+        blockStorage.DeleteWalrusSnapshot(snapshotId);
+    }
+
     @BeforeClass
     public static void setUp() {
         blockStorage = new BlockStorageController();

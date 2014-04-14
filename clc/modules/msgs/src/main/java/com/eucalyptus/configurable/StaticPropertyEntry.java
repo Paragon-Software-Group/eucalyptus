@@ -1,5 +1,5 @@
 /*************************************************************************
- * Copyright 2009-2014 Eucalyptus Systems, Inc.
+ * Copyright 2009-2012 Eucalyptus Systems, Inc.
  *
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -67,9 +67,10 @@ import java.lang.reflect.Modifier;
 import java.util.Date;
 import org.apache.log4j.Logger;
 import com.eucalyptus.bootstrap.Bootstrap;
+import com.eucalyptus.configurable.PropertyDirectory.NoopEventListener;
 import com.eucalyptus.records.Logs;
 import com.eucalyptus.system.Ats;
-import com.eucalyptus.util.Exceptions;
+import com.eucalyptus.util.Fields;
 
 public class StaticPropertyEntry extends AbstractConfigurableProperty {
   static Logger LOG = Logger.getLogger( StaticPropertyEntry.class );
@@ -142,7 +143,7 @@ public class StaticPropertyEntry extends AbstractConfigurableProperty {
   }
   
   @Override
-  public String setValue( String s ) throws ConfigurablePropertyException {
+  public String setValue( String s ) {
     if ( Modifier.isFinal( this.field.getModifiers( ) ) ) {
       return "failed to assign final field: " + super.getQualifiedName( );
     } else if ( Bootstrap.isFinished( ) ) {
@@ -155,8 +156,6 @@ public class StaticPropertyEntry extends AbstractConfigurableProperty {
       } catch ( Exception e ) {
         LOG.warn( "Failed to set property: " + super.getQualifiedName( ) + " because of " + e.getMessage( ) );
         Logs.extreme( ).debug( e, e );
-        Exceptions.findAndRethrow( e, ConfigurablePropertyException.class );
-        throw new ConfigurablePropertyException( e.getMessage( ), e );
       }
       return this.getValue( );
     } else {

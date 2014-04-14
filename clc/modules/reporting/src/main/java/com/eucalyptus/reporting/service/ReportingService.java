@@ -19,10 +19,7 @@
  ************************************************************************/
 package com.eucalyptus.reporting.service;
 
-import com.eucalyptus.auth.AuthContextSupplier;
-import static com.eucalyptus.component.id.Reporting.VENDOR_REPORTING;
 import static com.eucalyptus.reporting.ReportGenerationFacade.ReportGenerationArgumentException;
-import static com.eucalyptus.util.RestrictedTypes.getIamActionByMessageType;
 import java.text.DateFormat;
 import java.text.ParseException;
 import java.text.SimpleDateFormat;
@@ -30,7 +27,6 @@ import java.util.Date;
 import java.util.TimeZone;
 import org.apache.log4j.Logger;
 import org.jboss.netty.handler.codec.http.HttpResponseStatus;
-import com.eucalyptus.auth.Permissions;
 import com.eucalyptus.auth.principal.User;
 import com.eucalyptus.context.Context;
 import com.eucalyptus.context.Contexts;
@@ -56,8 +52,12 @@ public class ReportingService {
   public ExportReportDataResponseType exportData( final ExportReportDataType request ) throws EucalyptusCloudException {
     final ExportReportDataResponseType reply = request.getReply();
     reply.getResponseMetadata().setRequestId( reply.getCorrelationId( ) );
+    final Context ctx = Contexts.lookup();
+    final User requestUser = ctx.getUser( );
 
-    checkAuthorized();
+    if ( !requestUser.isSystemAdmin() ) {
+      throw new ReportingException( HttpResponseStatus.UNAUTHORIZED, ReportingException.NOT_AUTHORIZED, "Not authorized");
+    }
 
     Date startDate = null;
     Date endDate = null;
@@ -94,8 +94,12 @@ public class ReportingService {
   public DeleteReportDataResponseType deleteData( final DeleteReportDataType request ) throws EucalyptusCloudException {
     final DeleteReportDataResponseType reply = request.getReply();
     reply.getResponseMetadata().setRequestId( reply.getCorrelationId( ) );
+    final Context ctx = Contexts.lookup();
+    final User requestUser = ctx.getUser( );
 
-    checkAuthorized();
+    if ( !requestUser.isSystemAdmin() ) {
+      throw new ReportingException( HttpResponseStatus.UNAUTHORIZED, ReportingException.NOT_AUTHORIZED, "Not authorized");
+    }
 
     Date endDate;
     if ( request.getEndDate() != null ) {
@@ -119,8 +123,12 @@ public class ReportingService {
   public GenerateReportResponseType generateReport( final GenerateReportType request ) throws EucalyptusCloudException {
     final GenerateReportResponseType reply = request.getReply();
     reply.getResponseMetadata().setRequestId( reply.getCorrelationId( ) );
+    final Context ctx = Contexts.lookup();
+    final User requestUser = ctx.getUser( );
 
-    checkAuthorized();
+    if ( !requestUser.isSystemAdmin() ) {
+      throw new ReportingException( HttpResponseStatus.UNAUTHORIZED, ReportingException.NOT_AUTHORIZED, "Not authorized");
+    }
 
     final Period period = Period.defaultPeriod();
     long startTime = period.getBeginningMs();
@@ -185,16 +193,5 @@ public class ReportingService {
       dateFormat.setTimeZone( TimeZone.getTimeZone("UTC") );
     }
     return dateFormat;
-  }
-
-  private static void checkAuthorized() throws ReportingException {
-    final Context ctx = Contexts.lookup();
-    final User requestUser = ctx.getUser( );
-    final AuthContextSupplier requestUserSupplier = ctx.getAuthContext( );
-
-    if ( !requestUser.isSystemUser() ||
-        !Permissions.isAuthorized( VENDOR_REPORTING, "", "", null, getIamActionByMessageType(), requestUserSupplier ) ) {
-      throw new ReportingException( HttpResponseStatus.UNAUTHORIZED, ReportingException.NOT_AUTHORIZED, "Not authorized");
-    }
   }
 }

@@ -63,12 +63,6 @@
 @GroovyAddClassUUID
 package edu.ucsb.eucalyptus.msgs
 
-import com.google.common.collect.Lists
-
-import java.util.List
-import com.google.common.collect.Iterables
-import com.google.common.base.Joiner;
-
 public class CloudClusterMessage extends EucalyptusMessage {
   
   public CloudClusterMessage( ) {
@@ -87,7 +81,6 @@ public class StartNetworkType extends CloudClusterMessage {
   String networkUuid;
   int vlan;
   String netName;
-  String vmsubdomain;
   String nameserver;
   ArrayList<String> clusterControllers = new ArrayList<String>();
   String accountId;
@@ -132,7 +125,6 @@ public class StopNetworkResponseType extends CloudClusterMessage {
 }
 
 public class DescribeNetworksType extends CloudClusterMessage {
-  String vmsubdomain;
   String nameserver;
   String dnsDomainName;
   ArrayList<String> clusterControllers = new ArrayList<String>();
@@ -141,19 +133,18 @@ public class DescribeNetworksType extends CloudClusterMessage {
 public class DescribeNetworksResponseType extends CloudClusterMessage {
   Integer useVlans;
   String mode;
-  Integer addrsPerNet;
   Integer addrIndexMin;
   Integer addrIndexMax;
   Integer vlanMin;
   Integer vlanMax;
   String vnetSubnet;
   String vnetNetmask;
-  ArrayList<String> privateIps = Lists.newArrayList( )
-  ArrayList<NetworkInfoType> activeNetworks = Lists.newArrayList( )
+  Integer addrsPerNet;
+  ArrayList<NetworkInfoType> activeNetworks = new ArrayList<NetworkInfoType>();
   
   public String toString() {
-    return "${this.getClass().getSimpleName()} mode=${mode} addrsPerNet=${addrsPerNet} " +
-      "\n${this.getClass().getSimpleName()} " + (Joiner.on( "\n${this.getClass().getSimpleName()} " as String ).join(activeNetworks.iterator()));
+    return "${this.getClass().getSimpleName()} mode=${mode} addrsPerNet=${addrsPerNet} " \
+      + "\n${this.getClass().getSimpleName()} " + this.activeNetworks*.toString().join( "\n${this.getClass().getSimpleName()} " );
   }
 }
 public class AddressMappingInfoType extends EucalyptusData {
@@ -229,7 +220,7 @@ public class AssignAddressType extends CloudClusterMessage {
     this.instanceId = instanceId;
   }
   
-  def AssignAddressType(final EucalyptusMessage msg, final String uuid, final String source, final String destination, final String instanceId) {
+  def AssignAddressType(final BaseMessage msg, final String uuid, final String source, final String destination, final String instanceId) {
     super(msg);
     this.uuid = uuid;
     this.source = source;
@@ -259,7 +250,7 @@ public class UnassignAddressType extends CloudClusterMessage {
   String source;
   String destination;
   
-  def UnassignAddressType(final EucalyptusMessage msg, final String source, final String destination) {
+  def UnassignAddressType(final msg, final source, final destination) {
     super(msg);
     this.source = source;
     this.destination = destination;
@@ -312,12 +303,4 @@ public class ConfigureNetworkType extends CloudClusterMessage {
   }
 }
 public class ConfigureNetworkResponseType extends CloudClusterMessage {
-}
-
-class BroadcastNetworkInfoType extends CloudClusterMessage {
-  String networkInfo
-}
-
-class BroadcastNetworkInfoResponseType extends CloudClusterMessage {
-
 }

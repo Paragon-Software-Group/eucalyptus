@@ -19,10 +19,9 @@
  ************************************************************************/
 package com.eucalyptus.cloudwatch
 
-import com.eucalyptus.cloudwatch.common.CloudWatchResourceName
 import org.junit.Test
 import static org.junit.Assert.*
-import static com.eucalyptus.cloudwatch.common.CloudWatchResourceName.*
+import static com.eucalyptus.cloudwatch.CloudWatchResourceName.*
 
 /**
  * 

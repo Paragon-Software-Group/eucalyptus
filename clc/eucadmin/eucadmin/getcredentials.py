@@ -87,9 +87,6 @@ class GetCredentials(AWSQueryRequest):
                                                   self.user,
                                                   self.token),
                                     num_retries=1)
-        if not data:
-            raise ValueError('Failed to get credentials. '
-                             'Received empty credential data')
         fp = open(self.zipfile, 'wb')
         fp.write(data)
         fp.close()

@@ -86,14 +86,14 @@ import com.eucalyptus.blockstorage.msgs.CreateStorageSnapshotType;
 import com.eucalyptus.blockstorage.msgs.DescribeStorageSnapshotsResponseType;
 import com.eucalyptus.blockstorage.msgs.DescribeStorageSnapshotsType;
 import com.eucalyptus.blockstorage.msgs.StorageSnapshot;
-import com.eucalyptus.compute.common.CloudMetadata.SnapshotMetadata;
-import com.eucalyptus.compute.common.CloudMetadatas;
+import com.eucalyptus.cloud.CloudMetadata.SnapshotMetadata;
+import com.eucalyptus.cloud.CloudMetadatas;
 import com.eucalyptus.cloud.util.DuplicateMetadataException;
 import com.eucalyptus.component.Partitions;
 import com.eucalyptus.component.ServiceConfiguration;
 import com.eucalyptus.component.Topology;
 import com.eucalyptus.component.id.Eucalyptus;
-import com.eucalyptus.compute.identifier.ResourceIdentifiers;
+import com.eucalyptus.crypto.Crypto;
 import com.eucalyptus.entities.Entities;
 import com.eucalyptus.entities.TransactionException;
 import com.eucalyptus.entities.Transactions;
@@ -208,7 +208,7 @@ public class Snapshots {
     										entity.getParentVolume()),
     										entity.getNaturalId(),
     										entity.getDisplayName(),
-    										entity.getOwnerUserId() ) ); // snapshot info user name is user id
+    										entity.getOwnerUserName() ) ); // snapshot info user name is user id
     					} catch ( final Throwable e ) {
     						LOG.error( "Error inserting/creating reporting event for snapshot creation of snapshot: " + entity.getDisplayName(), e  );
     					}
@@ -281,7 +281,7 @@ public class Snapshots {
     final EntityTransaction db = Entities.get( Snapshot.class );
     try {
       while ( true ) {
-        final String newId = ResourceIdentifiers.generateString( SnapshotManager.ID_PREFIX );
+        final String newId = Crypto.generateId( userFullName.getUniqueId( ), SnapshotManager.ID_PREFIX );
         try {
           Entities.uniqueResult( Snapshot.named( null, newId ) );
         } catch ( NoSuchElementException e ) {

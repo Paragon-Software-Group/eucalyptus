@@ -1,5 +1,5 @@
 /*************************************************************************
- * Copyright 2009-2013 Eucalyptus Systems, Inc.
+ * Copyright 2009-2012 Eucalyptus Systems, Inc.
  *
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -81,15 +81,10 @@ public class DummyServiceBuilder implements ServiceBuilder<ServiceConfiguration>
   }
   
   @Override
-  public boolean checkAdd( String partition, String name, String host, Integer port ) throws ServiceRegistrationException {
+  public Boolean checkAdd( String partition, String name, String host, Integer port ) throws ServiceRegistrationException {
     return true;
   }
-
-  @Override
-  public boolean checkUpdate( final String partition, final String name, final String host, final Integer port ) throws ServiceRegistrationException {
-    return false;
-  }
-
+  
   @Override
   public ServiceConfiguration newInstance( String partition, String name, String host, Integer port ) {
     ComponentId compId = this.getComponentId( );

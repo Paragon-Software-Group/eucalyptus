@@ -76,7 +76,7 @@ import com.eucalyptus.bootstrap.Bootstrap.Stage;
 
 
 @Provides(Storage.class)
-@RunDuring(Bootstrap.Stage.RemoteServicesInit)
+@RunDuring(Bootstrap.Stage.DatabaseInit)
 @DependsLocal(Storage.class)
 public class BlockStorageBootstrapper extends Bootstrapper {
 	private static Logger LOG = Logger.getLogger( BlockStorageBootstrapper.class );

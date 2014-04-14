@@ -63,40 +63,30 @@
 package com.eucalyptus.auth.principal;
 
 import java.io.Serializable;
-import java.util.Date;
 import java.util.List;
 import com.eucalyptus.auth.AuthException;
 import com.eucalyptus.auth.PolicyParseException;
 
-public interface Group extends /*HasId, */AccountScopedPrincipal, Serializable {
+public interface Group extends /*HasId, */BasePrincipal, Serializable {
 
-  String getGroupId( );
-  void setName( String name ) throws AuthException;
+  public String getGroupId( );
+  public void setName( String name ) throws AuthException;
   
-  String getPath( );
-  void setPath( String path ) throws AuthException;
-
-  Date getCreateDate( );
-
-  Boolean isUserGroup( );
-  void setUserGroup( Boolean userGroup ) throws AuthException;
+  public String getPath( );
+  public void setPath( String path ) throws AuthException;
   
-  List<User> getUsers( ) throws AuthException;
-  boolean hasUser( String userName ) throws AuthException;
-  void addUserByName( String userName ) throws AuthException;
-  void removeUserByName( String userName ) throws AuthException;
+  public Boolean isUserGroup( );
+  public void setUserGroup( Boolean userGroup ) throws AuthException;
   
-  List<Policy> getPolicies( ) throws AuthException;
-
-  /**
-   * Add a policy, fail if exists.
-   */
-  Policy addPolicy( String name, String policy ) throws AuthException, PolicyParseException;
-
-  /**
-   * Add or update the named policy.
-   */
-  Policy putPolicy( String name, String policy ) throws AuthException, PolicyParseException;
-  void removePolicy( String name ) throws AuthException;
+  public Account getAccount( ) throws AuthException;
+  
+  public List<User> getUsers( ) throws AuthException;
+  public boolean hasUser( String userName ) throws AuthException;
+  public void addUserByName( String userName ) throws AuthException;
+  public void removeUserByName( String userName ) throws AuthException; 
+  
+  public List<Policy> getPolicies( ) throws AuthException;
+  public Policy addPolicy( String name, String policy ) throws AuthException, PolicyParseException;
+  public void removePolicy( String name ) throws AuthException;
   
 }

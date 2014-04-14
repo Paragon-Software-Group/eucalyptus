@@ -62,11 +62,6 @@ abstract class DelegatingContextSupport extends Context implements Wrapper<Conte
   }
 
   @Override
-  public boolean isAdministrator() {
-    return this.delegate.isAdministrator( );
-  }
-
-  @Override
   public Channel getChannel( ) {
     return this.delegate.getChannel( );
   }

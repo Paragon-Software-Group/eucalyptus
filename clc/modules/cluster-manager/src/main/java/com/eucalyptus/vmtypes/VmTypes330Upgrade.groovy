@@ -76,8 +76,6 @@ import com.eucalyptus.upgrade.Upgrades.Version
 import com.google.common.base.Function
 import com.google.common.base.Predicate
 import com.google.common.collect.Maps
-import groovy.transform.TypeCheckingMode
-import groovy.transform.CompileStatic
 
 /**
  * This upgrade is somewhat complicated because stopped instances may have a primary key reference
@@ -98,7 +96,6 @@ import groovy.transform.CompileStatic
  * 
  * @author chris grzegorczyk <grze@eucalyptus.com>
  */
-@CompileStatic(TypeCheckingMode.SKIP)
 public class VmTypes330Upgrade {
   private static Logger LOG = Logger.getLogger( VmTypes330Upgrade.class );
   static class VmTypeInfo {
@@ -156,7 +153,6 @@ public class VmTypes330Upgrade {
    */
   @PreUpgrade( value = Eucalyptus.class,
   since = Version.v3_3_0 )
-  @CompileStatic(TypeCheckingMode.SKIP)
   public static class PRE implements Callable<Boolean> {
     private static Logger LOG = Logger.getLogger( VmTypes330Upgrade.PRE.class );
     static final Map<String, VmTypeInfo> oldVmTypes = Maps.newHashMap( );
@@ -231,7 +227,6 @@ WHERE constraint_type = 'FOREIGN KEY' AND tc.table_name='metadata_instances' AND
    * @author chris grzegorczyk <grze@eucalyptus.com>
    */
   @EntityUpgrade( entities = [ VmType.class ], since = Version.v3_3_0, value = Eucalyptus.class )
-  @CompileStatic(TypeCheckingMode.SKIP)
   public static class ENTITY implements Predicate<Class> {
     private static Logger LOG = Logger.getLogger( VmTypes330Upgrade.ENTITY.class );
 
@@ -290,7 +285,6 @@ WHERE constraint_type = 'FOREIGN KEY' AND tc.table_name='metadata_instances' AND
    * @author chris grzegorczyk <grze@eucalyptus.com>
    */
   @PostUpgrade( value = Eucalyptus.class, since = Version.v3_3_0 )
-  @CompileStatic(TypeCheckingMode.SKIP)
   public static class POST implements Callable<Boolean> {
     private static Logger LOG = Logger.getLogger( VmTypes330Upgrade.POST.class );
     

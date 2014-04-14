@@ -1,5 +1,5 @@
 /*************************************************************************
- * Copyright 2009-2013 Eucalyptus Systems, Inc.
+ * Copyright 2009-2012 Eucalyptus Systems, Inc.
  *
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -80,7 +80,7 @@ import org.apache.log4j.Logger;
 import org.bouncycastle.openssl.PEMWriter;
 import org.bouncycastle.util.encoders.DecoderException;
 import com.eucalyptus.auth.AuthException;
-import com.eucalyptus.compute.common.CloudMetadatas;
+import com.eucalyptus.cloud.CloudMetadatas;
 import com.eucalyptus.compute.ClientComputeException;
 import com.eucalyptus.context.Context;
 import com.eucalyptus.context.Contexts;
@@ -117,7 +117,7 @@ public class KeyPairManager {
     final DescribeKeyPairsResponseType reply = request.getReply( );
     final Context ctx = Contexts.lookup( );
     final boolean showAll = request.getKeySet( ).remove( "verbose" );
-    final OwnerFullName ownerFullName = ctx.isAdministrator( ) &&  showAll  ? null : Contexts.lookup( ).getUserFullName( ).asAccountFullName( );
+    final OwnerFullName ownerFullName = ctx.hasAdministrativePrivileges( ) &&  showAll  ? null : Contexts.lookup( ).getUserFullName( ).asAccountFullName( );
     final Filter filter = Filters.generate( request.getFilterSet(), SshKeyPair.class );
     final Predicate<? super SshKeyPair> requestedAndAccessible = CloudMetadatas.filteringFor( SshKeyPair.class )
         .byId( request.getKeySet( ) )
@@ -223,11 +223,11 @@ public class KeyPairManager {
         RestrictedTypes.allocateUnitlessResource( allocator );
       } catch (GeneralSecurityException e) {
         LOG.warn("Error importing SSH public key", e);
-        throw new ClientComputeException( "InvalidKey.Format", "Invalid or unsupported key format" );
+        throw new EucalyptusCloudException("Key import error.");
       }
     }
     if ( duplicate ) {
-      throw new ClientComputeException( "InvalidKeyPair.Duplicate", "The keypair '"+request.getKeyName()+"' already exists." );
+      throw new EucalyptusCloudException("Duplicate key '"+request.getKeyName()+"'");
     }
     return reply;
   }

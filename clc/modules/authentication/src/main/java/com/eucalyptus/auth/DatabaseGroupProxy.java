@@ -1,5 +1,5 @@
 /*************************************************************************
- * Copyright 2009-2013 Eucalyptus Systems, Inc.
+ * Copyright 2009-2012 Eucalyptus Systems, Inc.
  *
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -62,15 +62,16 @@
 
 package com.eucalyptus.auth;
 
-import java.io.IOException;
-import java.io.ObjectInputStream;
-import java.util.Date;
 import java.util.List;
 import org.apache.log4j.Logger;
+import org.hibernate.Session;
+import org.hibernate.criterion.Example;
+import org.hibernate.criterion.MatchMode;
 import org.hibernate.criterion.Restrictions;
 import com.eucalyptus.auth.checker.InvalidValueException;
 import com.eucalyptus.auth.checker.ValueChecker;
 import com.eucalyptus.auth.checker.ValueCheckerFactory;
+import com.eucalyptus.auth.entities.AccountEntity;
 import com.eucalyptus.auth.entities.AuthorizationEntity;
 import com.eucalyptus.auth.entities.ConditionEntity;
 import com.eucalyptus.auth.entities.GroupEntity;
@@ -82,12 +83,10 @@ import com.eucalyptus.auth.principal.Account;
 import com.eucalyptus.auth.principal.Group;
 import com.eucalyptus.auth.principal.Policy;
 import com.eucalyptus.auth.principal.User;
-import com.eucalyptus.entities.Entities;
+import com.eucalyptus.entities.EntityWrapper;
+import com.eucalyptus.entities.Transactions;
 import java.util.concurrent.ExecutionException;
-import com.eucalyptus.entities.TransactionResource;
 import com.eucalyptus.util.Tx;
-import com.google.common.base.Supplier;
-import com.google.common.base.Suppliers;
 import com.google.common.collect.Lists;
 
 public class DatabaseGroupProxy implements Group {
@@ -101,19 +100,11 @@ public class DatabaseGroupProxy implements Group {
   private static Logger LOG = Logger.getLogger( DatabaseGroupProxy.class );
   
   private GroupEntity delegate;
-  private transient Supplier<String> accountNumberSupplier =
-      DatabaseAuthUtils.getAccountNumberSupplier( this );
-
+  
   public DatabaseGroupProxy( GroupEntity delegate ) {
     this.delegate = delegate;
   }
-
-  public DatabaseGroupProxy( final GroupEntity delegate,
-                             final String accountNumber ) {
-    this.delegate = delegate;
-    this.accountNumberSupplier = Suppliers.ofInstance( accountNumber );
-  }
-
+  
   @Override
   public String toString( ) {
     final StringBuilder sb = new StringBuilder( );
@@ -187,12 +178,7 @@ public class DatabaseGroupProxy implements Group {
       throw new AuthException( e );
     }
   }
-
-  @Override
-  public Date getCreateDate() {
-    return this.delegate.getCreationTimestamp( );
-  }
-
+  
   @Override
   public Boolean isUserGroup( ) {
     return this.delegate.isUserGroup( );
@@ -214,13 +200,15 @@ public class DatabaseGroupProxy implements Group {
 
   @Override
   public void addUserByName( String userName ) throws AuthException {
-    try ( final TransactionResource db = Entities.transactionFor( GroupEntity.class ) ) {
-      GroupEntity groupEntity = DatabaseAuthUtils.getUnique( GroupEntity.class, "groupId", this.delegate.getGroupId( ) );
-      UserEntity userEntity = DatabaseAuthUtils.getUniqueUser( userName, groupEntity.getAccount( ).getName( ) );
+    EntityWrapper<GroupEntity> db = EntityWrapper.get( GroupEntity.class );
+    try {
+      GroupEntity groupEntity = DatabaseAuthUtils.getUnique( db, GroupEntity.class, "groupId", this.delegate.getGroupId( ) );
+      UserEntity userEntity = DatabaseAuthUtils.getUniqueUser( db.recast( UserEntity.class ), userName, groupEntity.getAccount( ).getName( ) );
       groupEntity.getUsers( ).add( userEntity );
       userEntity.getGroups( ).add( groupEntity );
       db.commit( );
     } catch ( Exception e ) {
+      db.rollback( );
       Debugging.logError( LOG, e, "Failed to add user " + userName + " to group " + this.delegate );
       throw new AuthException( e );
     }
@@ -228,13 +216,15 @@ public class DatabaseGroupProxy implements Group {
 
   @Override
   public void removeUserByName( String userName ) throws AuthException {
-    try ( final TransactionResource db = Entities.transactionFor( GroupEntity.class ) ) {
-      GroupEntity groupEntity = DatabaseAuthUtils.getUnique( GroupEntity.class, "groupId", this.delegate.getGroupId( ) );
-      UserEntity userEntity = DatabaseAuthUtils.getUniqueUser( userName, groupEntity.getAccount( ).getName( ) );
+    EntityWrapper<GroupEntity> db = EntityWrapper.get( GroupEntity.class );
+    try {
+      GroupEntity groupEntity = DatabaseAuthUtils.getUnique( db, GroupEntity.class, "groupId", this.delegate.getGroupId( ) );
+      UserEntity userEntity = DatabaseAuthUtils.getUniqueUser( db.recast( UserEntity.class ), userName, groupEntity.getAccount( ).getName( ) );
       groupEntity.getUsers( ).remove( userEntity );
       userEntity.getGroups( ).remove( groupEntity );
       db.commit( );
     } catch ( Exception e ) {
+      db.rollback( );
       Debugging.logError( LOG, e, "Failed to remove user " + userName + " from group " + this.delegate );
       throw new AuthException( e );
     }
@@ -242,15 +232,17 @@ public class DatabaseGroupProxy implements Group {
   
   @Override
   public boolean hasUser( String userName ) throws AuthException {
-    try ( final TransactionResource db = Entities.transactionFor( UserEntity.class ) ) {
+    EntityWrapper<UserEntity> db = EntityWrapper.get( UserEntity.class );
+    try {
       @SuppressWarnings( "unchecked" )
-      List<UserEntity> users = ( List<UserEntity> ) Entities
+      List<UserEntity> users = ( List<UserEntity> ) db
           .createCriteria( UserEntity.class ).setCacheable( true ).add( Restrictions.eq( "name", userName ) )
           .createCriteria( "groups" ).setCacheable( true ).add( Restrictions.eq( "groupId", this.delegate.getGroupId( ) ) )
           .list( );
       db.commit( );
       return users.size( ) > 0;
     } catch ( Exception e ) {
+      db.rollback( );
       Debugging.logError( LOG, e, "Failed to check membership for group " + this.delegate );
       throw new AuthException( e );
     }
@@ -275,44 +267,32 @@ public class DatabaseGroupProxy implements Group {
 
   @Override
   public Policy addPolicy( String name, String policy ) throws AuthException, PolicyParseException {
-    return storePolicy( name, policy, /*allowUpdate*/ false );
-  }
-
-  @Override
-  public Policy putPolicy( String name, String policy ) throws AuthException, PolicyParseException {
-    return storePolicy( name, policy, /*allowUpdate*/ true );
-  }
-
-  private Policy storePolicy( String name, String policy, boolean allowUpdate ) throws AuthException, PolicyParseException {
     try {
       POLICY_NAME_CHECKER.check( name );
     } catch ( InvalidValueException e ) {
       Debugging.logError( LOG, e, "Invalid policy name " + name );
       throw new AuthException( AuthException.INVALID_NAME, e );
     }
-    if ( DatabaseAuthUtils.policyNameinList( name, this.getPolicies( ) ) && !allowUpdate ) {
+    if ( DatabaseAuthUtils.policyNameinList( name, this.getPolicies( ) ) ) {
       Debugging.logError( LOG, null, "Policy name already used: " + name );
       throw new AuthException( AuthException.INVALID_NAME );
     }    
     PolicyEntity parsedPolicy = PolicyParser.getInstance( ).parse( policy );
     parsedPolicy.setName( name );
-    try ( final TransactionResource db = Entities.transactionFor( GroupEntity.class ) ) {
-      final GroupEntity groupEntity = DatabaseAuthUtils.getUnique( GroupEntity.class, "groupId", this.delegate.getGroupId( ) );
-      final PolicyEntity remove = DatabaseAuthUtils.removeGroupPolicy( groupEntity, name );
-      if ( remove != null ) {
-        Entities.delete( remove );
-      }
-      Entities.persist( parsedPolicy );
+    EntityWrapper<GroupEntity> db = EntityWrapper.get( GroupEntity.class );
+    try {
+      GroupEntity groupEntity = DatabaseAuthUtils.getUnique( db, GroupEntity.class, "groupId", this.delegate.getGroupId( ) );
+      db.recast( PolicyEntity.class ).add( parsedPolicy );
       parsedPolicy.setGroup( groupEntity );
       for ( StatementEntity statement : parsedPolicy.getStatements( ) ) {
-        Entities.persist( statement );
+        db.recast( StatementEntity.class ).add( statement );
         statement.setPolicy( parsedPolicy );
         for ( AuthorizationEntity auth : statement.getAuthorizations( ) ) {
-          Entities.persist( auth );
+          db.recast( AuthorizationEntity.class ).add( auth );
           auth.setStatement( statement );
         }
         for ( ConditionEntity cond : statement.getConditions( ) ) {
-          Entities.persist( cond );
+          db.recast( ConditionEntity.class ).add( cond );
           cond.setStatement( statement );
         }
       }
@@ -320,6 +300,7 @@ public class DatabaseGroupProxy implements Group {
       db.commit( );
       return new DatabasePolicyProxy( parsedPolicy );
     } catch ( Exception e ) {
+      db.rollback( );
       Debugging.logError( LOG, e, "Failed to attach policy for " + this.delegate.getName( ) );
       throw new AuthException( "Failed to attach policy", e );
     }
@@ -330,14 +311,16 @@ public class DatabaseGroupProxy implements Group {
     if ( name == null ) {
       throw new AuthException( AuthException.EMPTY_POLICY_NAME );
     }
-    try ( final TransactionResource db = Entities.transactionFor( GroupEntity.class ) ) {
-      GroupEntity group = DatabaseAuthUtils.getUnique( GroupEntity.class, "groupId", this.delegate.getGroupId( ) );
+    EntityWrapper<GroupEntity> db = EntityWrapper.get( GroupEntity.class );
+    try {
+      GroupEntity group = DatabaseAuthUtils.getUnique( db, GroupEntity.class, "groupId", this.delegate.getGroupId( ) );
       PolicyEntity policy = DatabaseAuthUtils.removeGroupPolicy( group, name );
       if ( policy != null ) {
-        Entities.delete( policy );
+        db.recast( PolicyEntity.class ).delete( policy );
       }
       db.commit( );
     } catch ( Exception e ) {
+      db.rollback( );
       Debugging.logError( LOG, e, "Failed to remove policy " + name + " in " + this.delegate );
       throw new AuthException( "Failed to remove policy", e );
     }
@@ -361,18 +344,12 @@ public class DatabaseGroupProxy implements Group {
   }
 
   @Override
-  public String getAccountNumber( ) throws AuthException {
-    return DatabaseAuthUtils.extract( accountNumberSupplier );
-  }
-
-  @Override
   public Account getAccount( ) {
     final List<DatabaseAccountProxy> results = Lists.newArrayList( );
     try {
       DatabaseAuthUtils.invokeUnique( GroupEntity.class, "groupId", this.delegate.getGroupId( ), new Tx<GroupEntity>( ) {
         public void fire( GroupEntity t ) {
-          Entities.initialize( t.getAccount( ) );
-          results.add( new DatabaseAccountProxy( t.getAccount( ) ) );
+          results.add( new DatabaseAccountProxy( ( AccountEntity) t.getAccount( ) ) );
         }
       } );
     } catch ( ExecutionException e ) {
@@ -385,9 +362,5 @@ public class DatabaseGroupProxy implements Group {
   public String getGroupId( ) {
     return this.delegate.getGroupId( );
   }
-
-  private void readObject( ObjectInputStream in) throws IOException, ClassNotFoundException {
-    in.defaultReadObject( );
-    this.accountNumberSupplier = DatabaseAuthUtils.getAccountNumberSupplier( this );
-  }
+  
 }

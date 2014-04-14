@@ -972,6 +972,11 @@ public class HmacLoginModuleTest {
       }
 
       @Override
+      public void setCreateDate(final Date createDate) throws AuthException {
+        throw new IllegalStateException();
+      }
+
+      @Override
       public User getUser() throws AuthException {
         return null;
       }

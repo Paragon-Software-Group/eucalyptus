@@ -1,5 +1,5 @@
 /*************************************************************************
- * Copyright 2009-2014 Eucalyptus Systems, Inc.
+ * Copyright 2009-2013 Eucalyptus Systems, Inc.
  *
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -19,18 +19,14 @@
  ************************************************************************/
 package com.eucalyptus.util;
 
-import java.util.Collection;
-import java.util.Collections;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
-import javax.annotation.Nonnull;
 import javax.annotation.Nullable;
 import com.google.common.base.Function;
 import com.google.common.base.Functions;
 import com.google.common.base.Predicate;
 import com.google.common.base.Predicates;
-import com.google.common.collect.FluentIterable;
 import com.google.common.collect.Iterables;
 import com.google.common.collect.Lists;
 import com.google.common.collect.Multimap;
@@ -71,38 +67,6 @@ public class CollectionUtils {
   }
 
   /**
-   * Create a fluent iterable for the given iterable.
-   *
-   * @param iterable The possibly null iterable
-   * @param <T> The iterable type
-   * @return the FluentIterable
-   */
-  @Nonnull
-  public static <T> FluentIterable<T> fluent( @Nullable final Iterable<T> iterable ) {
-    return FluentIterable.from(
-        iterable == null ?
-            Collections.<T>emptyList( ) :
-            iterable );
-  }
-
-  /**
-   * Predicate for collections containing the given item.
-   *
-   * @param item The required item
-   * @param <CIT> The item type
-   * @param <CT> The collection type
-   * @return A collection matching predicate
-   */
-  public static <CIT,CT extends Collection<? super CIT>> Predicate<CT> contains( final CIT item ) {
-    return new Predicate<CT>( ){
-      @Override
-      public boolean apply( @Nullable final CT collection ) {
-        return collection != null && collection.contains( item );
-      }
-    };
-  }
-
-  /**
    * Convenience method for a predicate on a property value.
    *
    * @param propertyValue The property value to match
@@ -114,37 +78,6 @@ public class CollectionUtils {
   public static <T,PT> Predicate<T> propertyPredicate( final PT propertyValue,
                                                        final Function<T,PT> propertyFunction ) {
     return Predicates.compose( Predicates.equalTo( propertyValue ), propertyFunction );
-  }
-
-  /**
-   * Convenience method for a predicate on a property value.
-   *
-   * @param propertyValues The property values to match
-   * @param propertyFunction The function to extract the property
-   * @param <T> The predicate type
-   * @param <PT> The property type
-   * @return A predicate that extracts a value to compare with the given values.
-   */
-  public static <T,PT> Predicate<T> propertyPredicate( final Collection<PT> propertyValues,
-                                                       final Function<T,PT> propertyFunction ) {
-    return Predicates.compose( Predicates.in( propertyValues ), propertyFunction );
-  }
-
-  /**
-   * Convenience method for a predicate on a property value.
-   *
-   * @param propertyValue The property value to match
-   * @param propertyFunction The function to extract the collection property
-   * @param <T> The predicate type
-   * @param <PCT> The property collection type
-   * @param <PIT> The property collection item type
-   * @return A predicate that extracts a value to compare with the given value.
-   */
-  public static <T,PIT, PCT extends Collection<? super PIT>> Predicate<T> propertyContainsPredicate(
-      final PIT propertyValue,
-      final Function<T,PCT> propertyFunction
-  ) {
-    return Predicates.compose( contains( propertyValue ), propertyFunction );
   }
 
   public static <T> Function<T,List<T>> listUnit() {
@@ -169,21 +102,6 @@ public class CollectionUtils {
             Lists.newArrayList( Iterables.concat( t ) );
       }
     };
-  }
-
-  /**
-   * Unchecked cast function.
-   *
-   * @param target The type to cast to
-   * @param <F> The source type
-   * @param <T> The result type
-   * @return A function that casts to the given type
-   * @see Predicates#instanceOf(Class)
-   * @see Iterables#filter(Iterable, Class)
-   */
-  public static <F,T> Function<F,T> cast( final Class<T> target ) {
-    //noinspection unchecked
-    return (Function<F,T>) Functions.identity( );
   }
 
   /**

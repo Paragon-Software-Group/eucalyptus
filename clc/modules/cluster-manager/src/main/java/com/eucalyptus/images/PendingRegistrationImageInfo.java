@@ -64,7 +64,7 @@
 
 package com.eucalyptus.images;
 
-import com.eucalyptus.compute.common.ImageMetadata;
+import com.eucalyptus.cloud.ImageMetadata;
 
 public class PendingRegistrationImageInfo extends ImageInfo implements BootableImageInfo {
 

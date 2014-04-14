@@ -1,5 +1,5 @@
 /*************************************************************************
- * Copyright 2009-2014 Eucalyptus Systems, Inc.
+ * Copyright 2009-2012 Eucalyptus Systems, Inc.
  *
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -84,9 +84,8 @@ import com.eucalyptus.blockstorage.entities.StorageInfo;
 import com.eucalyptus.blockstorage.util.StorageProperties;
 import com.eucalyptus.configurable.ConfigurableClass;
 import com.eucalyptus.configurable.ConfigurableProperty;
-import com.eucalyptus.configurable.ConfigurablePropertyException;
 import com.eucalyptus.configurable.PropertyDirectory;
-import com.eucalyptus.objectstorage.util.ObjectStorageProperties;
+import com.eucalyptus.objectstorage.util.WalrusProperties;
 import com.eucalyptus.storage.common.CheckerTask;
 import com.eucalyptus.util.EucalyptusCloudException;
 import com.google.common.base.Joiner;
@@ -830,7 +829,7 @@ public class OverlayManager extends DASManager {
 						removeLoopback(volLoDevName);
 					}		
 					returnValues.add(snapRawFileName);
-					returnValues.add(String.valueOf(size * ObjectStorageProperties.G));
+					returnValues.add(String.valueOf(size * WalrusProperties.G));
 					volumeManager = new VolumeEntityWrapperManager();
 					LVMVolumeInfo foundSnapshotInfo = volumeManager.getVolumeInfo(snapshotId);
 					foundSnapshotInfo.setLoFileName(snapRawFileName);
@@ -1049,7 +1048,7 @@ public class OverlayManager extends DASManager {
 				ConfigurableProperty entry = PropertyDirectory.getPropertyEntry(prop.getQualifiedName());
 				//type parser will correctly covert the value
 				entry.setValue(prop.getValue());
-			} catch (IllegalAccessException | ConfigurablePropertyException e) {
+			} catch (IllegalAccessException e) {
 				LOG.error(e, e);
 			}
 		}

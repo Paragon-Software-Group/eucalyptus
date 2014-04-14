@@ -61,14 +61,6 @@
  ************************************************************************/
 
 package com.eucalyptus.ws;
-/**
-###########################################################
-# ObjectStorage Properties
-###########################################################
-# Each option is listed with its default value indicated.  
-# Only key-value pair options are honored at this time
-###########################################################
-**/
 
 import org.jboss.netty.handler.codec.http.HttpResponseStatus;
 
