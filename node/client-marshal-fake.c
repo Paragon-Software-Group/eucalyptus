@@ -88,6 +88,7 @@
 #define HANDLERS_FANOUT
 #include "handlers.h"
 #include "client-marshal.h"
+#include <euca_auth.h>
 
 /*----------------------------------------------------------------------------*\
  |                                                                            |
@@ -193,12 +194,72 @@ void saveNcStuff()
 //!
 int setup_shared_buffer_fake(void **buf, char *bufname, size_t bytes, sem_t ** lock, char *lockname, int mode)
 {
+    int shd, rc, ret;
+
+    // create a lock and grab it
+    *lock = sem_open(lockname, O_CREAT, 0644, 1);
+    sem_wait(*lock);
+    ret = 0;
+
+    if (mode == SHARED_MEM) {
+        // set up shared memory segment for config
+        shd = shm_open(bufname, O_CREAT | O_RDWR | O_EXCL, 0644);
+        if (shd >= 0) {
+            // if this is the first process to create the config, init to 0
+            rc = ftruncate(shd, bytes);
+        } else {
+            shd = shm_open(bufname, O_CREAT | O_RDWR, 0644);
+        }
+        if (shd < 0) {
+            fprintf(stderr, "cannot initialize shared memory segment\n");
+            sem_post(*lock);
+            sem_close(*lock);
+            return (1);
+        }
+        *buf = mmap(0, bytes, PROT_READ | PROT_WRITE, MAP_SHARED, shd, 0);
+    } else if (mode == SHARED_FILE) {
+        char *tmpstr, path[EUCA_MAX_PATH];
+        struct stat mystat;
+        int fd;
+
+        tmpstr = getenv(EUCALYPTUS_ENV_VAR_NAME);
+        if (!tmpstr) {
+            snprintf(path, EUCA_MAX_PATH, EUCALYPTUS_STATE_DIR "/CC/%s", "", bufname);
+        } else {
+            snprintf(path, EUCA_MAX_PATH, EUCALYPTUS_STATE_DIR "/CC/%s", tmpstr, bufname);
+        }
+        fd = open(path, O_RDWR | O_CREAT, 0600);
+        if (fd < 0) {
+            fprintf(stderr, "ERROR: cannot open/create '%s' to set up mmapped buffer\n", path);
+            ret = 1;
+        } else {
+            mystat.st_size = 0;
+            rc = fstat(fd, &mystat);
+            // this is the check to make sure we're dealing with a valid prior config
+            if (mystat.st_size != bytes) {
+                rc = ftruncate(fd, bytes);
+            }
+            *buf = mmap(NULL, bytes, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
+            if (*buf == NULL) {
+                fprintf(stderr, "ERROR: cannot mmap fd\n");
+                ret = 1;
+            }
+            close(fd);
+        }
+    }
+    sem_post(*lock);
+    return (ret);
+}
+
+#if 0
+int setup_shared_buffer_fake(void **buf, char *bufname, size_t bytes, sem_t ** lock, char *lockname, int mode)
+{
     int shd = 0;
     int rc = 0;
     int ret = EUCA_OK;
     int fd = 0;
     char *tmpstr = NULL;
-    char path[MAX_PATH] = "";
+    char path[EUCA_MAX_PATH] = "";
     struct stat mystat = { 0 };
 
     // create a lock and grab it
@@ -224,9 +285,9 @@ int setup_shared_buffer_fake(void **buf, char *bufname, size_t bytes, sem_t ** l
         *buf = mmap(0, bytes, PROT_READ | PROT_WRITE, MAP_SHARED, shd, 0);
     } else if (mode == SHARED_FILE) {
         if ((tmpstr = getenv(EUCALYPTUS_ENV_VAR_NAME)) == NULL) {
-            snprintf(path, MAX_PATH, EUCALYPTUS_KEYS_DIR "/CC/%s", bufname);
+            snprintf(path, EUCA_MAX_PATH, EUCALYPTUS_KEYS_DIR "/CC/%s", bufname);
         } else {
-            snprintf(path, MAX_PATH, EUCALYPTUS_KEYS_DIR "/CC/%s", tmpstr, bufname);
+            snprintf(path, EUCA_MAX_PATH, EUCALYPTUS_KEYS_DIR "/CC/%s", tmpstr, bufname);
         }
 
         if ((fd = open(path, O_RDWR | O_CREAT, 0600)) < 0) {
@@ -251,19 +312,18 @@ int setup_shared_buffer_fake(void **buf, char *bufname, size_t bytes, sem_t ** l
     sem_post(*lock);
     return (ret);
 }
+#endif
 
 //!
 //! Loads NC stuff
 //!
 void loadNcStuff()
 {
-    int fd = 0;
     int i = 0;
     int j = 0;
     int count = 0;
     int done = 0;
     int rc = 0;
-    struct stat mystat = { 0 };
 
     rc = setup_shared_buffer_fake((void **)&myconfig, "/eucalyptusCCfakeconfig", sizeof(fakeconfig), &fakelock, "/eucalyptusCCfakelock", SHARED_FILE);
     if (rc) {
@@ -286,7 +346,7 @@ void loadNcStuff()
         myconfig->current = time(NULL);
     }
 
-    LOGDEBUG("fakeNC: setup(): last=%d current=%d\n", myconfig->last, myconfig->current);
+    LOGDEBUG("fakeNC: setup(): last=%ld current=%ld\n", myconfig->last, myconfig->current);
     if ((myconfig->current - myconfig->last) > 30) {
         // do a refresh
         myconfig->last = time(NULL);
@@ -412,6 +472,43 @@ int ncStubDestroy(ncStub * pStub)
     return (EUCA_OK);
 }
 
+//! Handles the client broadcast network info rquest
+//!
+//! @param[in] pStub a pointer to the node controller (NC) stub structure
+//! @param[in] pMeta a pointer to the node controller (NC) metadata structure
+//! @param[in] networkInfo is a string
+//!
+//! @return Always return EUCA_OK.
+//!
+int ncBroadcastNetworkInfoStub(ncStub * pStub, ncMetadata * pMeta, char *networkInfo)
+{
+    char *xmlbuf = NULL, xmlpath[EUCA_MAX_PATH];
+    int ret = EUCA_OK, rc = 0;
+
+    if (networkInfo == NULL) {
+        LOGERROR("internal error (bad input parameters to doBroadcastNetworkInfo)\n");
+        return (EUCA_INVALID_ERROR);
+    }
+
+    LOGTRACE("encoded networkInfo=%s\n", networkInfo);
+    snprintf(xmlpath, EUCA_MAX_PATH, "/tmp/global_network_info.xml");
+    LOGDEBUG("decoding/writing buffer to (%s)\n", xmlpath);
+    xmlbuf = base64_dec((unsigned char *)networkInfo, strlen(networkInfo));
+    if (xmlbuf) {
+        rc = str2file(xmlbuf, xmlpath, O_CREAT | O_TRUNC | O_WRONLY, 0644, FALSE);
+        if (rc) {
+            LOGERROR("could not write XML data to file (%s)\n", xmlpath);
+            ret = EUCA_ERROR;
+        }
+        EUCA_FREE(xmlbuf);
+    } else {
+        LOGERROR("could not b64 decode input buffer\n");
+        ret = EUCA_ERROR;
+    }
+
+    return (EUCA_OK);
+}
+
 //!
 //! Handles the Run instance request
 //!
@@ -443,11 +540,10 @@ int ncStubDestroy(ncStub * pStub)
 //!
 int ncRunInstanceStub(ncStub * pStub, ncMetadata * pMeta, char *uuid, char *instanceId, char *reservationId, virtualMachine * params, char *imageId,
                       char *imageURL, char *kernelId, char *kernelURL, char *ramdiskId, char *ramdiskURL, char *ownerId, char *accountId,
-                      char *keyName, netConfig * netparams, char *userData, char *launchIndex, char *platform, int expiryTime, char **groupNames,
+                      char *keyName, netConfig * netparams, char *userData, char *credential, char *launchIndex, char *platform, int expiryTime, char **groupNames,
                       int groupNamesSize, ncInstance ** outInstPtr)
 {
     int i = 0;
-    int j = 0;
     int foundidx = -1;
     ncInstance *instance = NULL;
 
@@ -559,7 +655,7 @@ int ncAssignAddressStub(ncStub * pStub, ncMetadata * pMeta, char *instanceId, ch
     for (i = 0; i < MAX_FAKE_INSTANCES && !done; i++) {
         if (!strcmp(myconfig->global_instances[i].instanceId, instanceId)) {
             LOGDEBUG("fakeNC: assignAddress()\tsetting publicIp at idx %d\n", i);
-            snprintf(myconfig->global_instances[i].ncnet.publicIp, 24, "%s", publicIp);
+            snprintf(myconfig->global_instances[i].ncnet.publicIp, IP_BUFFER_SIZE, "%s", publicIp);
             done++;
         }
     }
@@ -615,6 +711,12 @@ int ncDescribeInstancesStub(ncStub * pStub, ncMetadata * pMeta, char **instIds, 
             newinst = EUCA_ZALLOC(1, sizeof(ncInstance));
             if (!strcmp(myconfig->global_instances[i].stateName, "Pending")) {
                 snprintf(myconfig->global_instances[i].stateName, 8, "Extant");
+                if (!strcmp(myconfig->global_instances[i].ncnet.publicIp, "0.0.0.0")) {
+                    snprintf(myconfig->global_instances[i].ncnet.publicIp, IP_BUFFER_SIZE, "%d.%d.%d.%d", rand() % 254 + 1, rand() % 254 + 1, rand() % 254 + 1, rand() % 254 + 1);
+                }
+                if (!strcmp(myconfig->global_instances[i].ncnet.privateIp, "0.0.0.0")) {
+                    snprintf(myconfig->global_instances[i].ncnet.privateIp, IP_BUFFER_SIZE, "%d.%d.%d.%d", rand() % 254 + 1, rand() % 254 + 1, rand() % 254 + 1, rand() % 254 + 1);
+                }
             }
 
             memcpy(newinst, &(myconfig->global_instances[i]), sizeof(ncInstance));
@@ -714,7 +816,7 @@ int ncDescribeResourceStub(ncStub * pStub, ncMetadata * pMeta, char *resourceTyp
 
     if (myconfig->res.memorySizeMax <= 0) {
         // not initialized?
-        res = allocate_resource("OK", "iqn.1993-08.org.debian:01:736a4e92c588", 1024000, 1024000, 30000000, 30000000, 4096, 4096, "none");
+        res = allocate_resource("OK", 0, "iqn.1993-08.org.debian:01:736a4e92c588", 1024000, 1024000, 30000000, 30000000, 4096, 4096, "none");
         if (!res) {
             LOGERROR("fakeNC: describeResource(): failed to allocate fake resource\n");
             ret = EUCA_ERROR;
@@ -725,6 +827,7 @@ int ncDescribeResourceStub(ncStub * pStub, ncMetadata * pMeta, char *resourceTyp
     }
 
     if (!ret) {
+        snprintf(myconfig->res.nodeStatus, 32, "enabled");
         res = EUCA_ALLOC(1, sizeof(ncResource));
         memcpy(res, &(myconfig->res), sizeof(ncResource));
         *outRes = res;
@@ -780,7 +883,7 @@ int ncAttachVolumeStub(ncStub * pStub, ncMetadata * pMeta, char *instanceId, cha
             if (!vdone && foundidx >= 0) {
                 LOGDEBUG("fakeNC: \tfake attaching volume at idx %d\n", foundidx);
                 snprintf(myconfig->global_instances[i].volumes[foundidx].volumeId, CHAR_BUFFER_SIZE, "%s", volumeId);
-                snprintf(myconfig->global_instances[i].volumes[foundidx].remoteDev, VERY_BIG_CHAR_BUFFER_SIZE, "%s", remoteDev);
+                snprintf(myconfig->global_instances[i].volumes[foundidx].attachmentToken, CHAR_BUFFER_SIZE, "%s", remoteDev);
                 snprintf(myconfig->global_instances[i].volumes[foundidx].localDev, CHAR_BUFFER_SIZE, "%s", localDev);
                 snprintf(myconfig->global_instances[i].volumes[foundidx].localDevReal, CHAR_BUFFER_SIZE, "%s", localDev);
                 snprintf(myconfig->global_instances[i].volumes[foundidx].stateName, CHAR_BUFFER_SIZE, "%s", "attached");
@@ -887,7 +990,7 @@ int ncDescribeSensorsStub(ncStub * pStub, ncMetadata * pMeta, int historySize, l
 //! @param[in]  pStub a pointer to the node controller (NC) stub structure
 //! @param[in]  pMeta a pointer to the node controller (NC) metadata structure
 //! @param[in]  stateName the next state for the node controller
-//! 
+//!
 //! @return Always returns EUCA_OK
 //!
 int ncModifyNodeStub(ncStub * pStub, ncMetadata * pMeta, char *stateName)
@@ -942,6 +1045,26 @@ int ncStartInstanceStub(ncStub * pStub, ncMetadata * pMeta, char *instanceId)
 //! @see ncStopInstance()
 //!
 int ncStopInstanceStub(ncStub * pStub, ncMetadata * pMeta, char *instanceId)
+{
+    return (EUCA_OK);
+}
+
+int ncGetConsoleOutputStub(ncStub * pStub, ncMetadata * pMeta, char *instanceId, char **consoleOutput)
+{
+    return (EUCA_OK);
+}
+
+int ncOPERATIONStub(ncStub * pStub, ncMetadata * pMeta, ...)
+{
+    return (EUCA_OK);
+}
+
+int ncRebootInstanceStub(ncStub * pStub, ncMetadata * pMeta, char *instanceId)
+{
+    return (EUCA_OK);
+}
+
+int ncStartNetworkStub(ncStub * pStub, ncMetadata * pMeta, char *uuid, char **peers, int peersLen, int port, int vlan, char **outStatus)
 {
     return (EUCA_OK);
 }

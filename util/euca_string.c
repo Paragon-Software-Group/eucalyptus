@@ -399,6 +399,38 @@ char *euca_strduptolower(const char *restrict string)
 }
 
 //!
+//! Works in exactly the same way strdup() does but we allocate the memory and sanitize the string. This
+//! is mainly when we want to duplicate untrusted strings
+//!
+//! @param[in] s1 the string to be duplicated and sanitized
+//!
+//! @return a pointer to the newly allocated string or NULL if any error occured
+//!
+//! @pre \p s1 fields must be provided
+//!
+//! @post a new string is allocated and sanitized on success
+//!
+char *euca_strdup(const char *s1)
+{
+    char *sRet = NULL;
+    size_t len = 0;
+
+    // Validate s1
+    if (s1) {
+        // make sure we allocate at least 1 character for empty strings
+        len = (((len = strlen(s1)) > 0) ? len : 1);
+
+        // Allocate the memory
+        if ((sRet = EUCA_ALLOC(len, sizeof(char))) != NULL) {
+            // now copy s1 in sRet using sprintf()
+            sprintf(sRet, "%s", s1);
+        }
+    }
+
+    return (sRet);
+}
+
+//!
 //! Returns a new string in which \p s2 is appended to \p s1 and frees \p s1. A NULL
 //! character is appended to the resulting string.
 //!
@@ -656,4 +688,48 @@ int euca_machexcmp(char *psMac, u8 aMac[6])
     if (mac2hex(psMac, aMacConv) != NULL)
         return (memcmp(aMacConv, aMac, (6 * sizeof(u8))));
     return (-1);
+}
+
+//!
+//! Take a given string and split it into a list of up to nbTokens tokens based on a given delimiter
+//!
+//! @param[in] list the string containing the list of tokens delimited by \p delim
+//! @param[in] delim the delimiter string to use to split the list
+//! @param[in,out] tokens an array of pointers to string that will end up containing the tokens
+//! @param[in] nbTokens the size of the tokens array
+//!
+//! @return -1 on failure or the number of tokens it was able to find
+//!
+//! @pre \p list, \p delim and \p tokens MUST not be null
+//!
+//! @post The list of tokens is filled with allocated strings and the original \p list isn't modified.
+//!
+//! @note the caller is responsible to free all tokens.
+//!
+int euca_tokenizer(char *list, char *delim, char *tokens[], int nbTokens)
+{
+    int count = 0;
+    char *ptr = NULL;
+    char *token = NULL;
+    char *dupList = NULL;
+    char *savePtr = NULL;
+
+    // Validate our parameters
+    if ((list == NULL) || (delim == NULL) || (tokens == NULL))
+        return (-1);
+
+    // Duplicate the list to avoid modifying it
+    if ((dupList = strdup(list)) == NULL) {
+        return (-1);
+    }
+    // retrieve our tokens
+    ptr = dupList;
+    while (((token = strtok_r(ptr, delim, &savePtr)) != NULL) && (count < nbTokens)) {
+        tokens[count++] = strdup(token);
+        ptr = savePtr;
+    }
+
+    // Free out list
+    EUCA_FREE(dupList);
+    return (count);
 }

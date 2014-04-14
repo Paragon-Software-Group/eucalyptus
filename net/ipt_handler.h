@@ -130,13 +130,14 @@ typedef struct ipt_handler_t {
     ipt_table *tables;
     int max_tables;
     int init;
-    char ipt_file[MAX_PATH];
-    char cmdprefix[MAX_PATH];
+    char ipt_file[EUCA_MAX_PATH];
+    char cmdprefix[EUCA_MAX_PATH];
 } ipt_handler;
 
 typedef struct ips_set_t {
     char name[64];
     u32 *member_ips;
+    int *member_nms;
     int max_member_ips;
     int ref_count;
 } ips_set;
@@ -144,7 +145,7 @@ typedef struct ips_set_t {
 typedef struct ips_handler_t {
     ips_set *sets;
     int max_sets;
-    char ips_file[MAX_PATH], cmdprefix[MAX_PATH];
+    char ips_file[EUCA_MAX_PATH], cmdprefix[EUCA_MAX_PATH];
     int init;
 } ips_handler;
 
@@ -169,9 +170,10 @@ typedef struct ebt_handler_t {
     ebt_table *tables;
     int max_tables;
     int init;
-    char ebt_file[MAX_PATH];
-    char ebt_asc_file[MAX_PATH];
-    char cmdprefix[MAX_PATH];
+    char ebt_filter_file[EUCA_MAX_PATH];
+    char ebt_nat_file[EUCA_MAX_PATH];
+    char ebt_asc_file[EUCA_MAX_PATH];
+    char cmdprefix[EUCA_MAX_PATH];
 } ebt_handler;
 
 /*----------------------------------------------------------------------------*\
@@ -185,6 +187,8 @@ typedef struct ebt_handler_t {
  |                             EXPORTED PROTOTYPES                            |
  |                                                                            |
 \*----------------------------------------------------------------------------*/
+
+int cidrsplit(char *ipname, char **ippart, int *nmpart);
 
 //! @{
 //! @name IP tables API
@@ -233,6 +237,9 @@ int ips_handler_deploy(ips_handler * ipsh, int dodelete);
 
 int ips_handler_add_set(ips_handler * ipsh, char *setname);
 ips_set *ips_handler_find_set(ips_handler * ipsh, char *findset);
+
+int ips_set_add_net(ips_handler * ipsh, char *setname, char *ip, int nm);
+u32 *ips_set_find_net(ips_handler * ipsh, char *setname, char *findip, int findnm);
 
 int ips_set_add_ip(ips_handler * ipsh, char *setname, char *ip);
 u32 *ips_set_find_ip(ips_handler * ipsh, char *setname, char *findip);

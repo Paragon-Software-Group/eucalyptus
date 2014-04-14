@@ -376,7 +376,7 @@
 	      <xs:element minOccurs="0" maxOccurs="1" name="instanceId" type="xs:string"/>
 	      <xs:element minOccurs="0" maxOccurs="1" name="bucketName" type="xs:string"/>
 	      <xs:element minOccurs="0" maxOccurs="1" name="filePrefix" type="xs:string"/>
-	      <xs:element minOccurs="0" maxOccurs="1" name="walrusURL" type="xs:string"/>
+	      <xs:element minOccurs="0" maxOccurs="1" name="objectStorageURL" type="xs:string"/>
 	      <xs:element minOccurs="0" maxOccurs="1" name="userPublicKey" type="xs:string"/>
 	      <xs:element minOccurs="0" maxOccurs="1" name="S3Policy" type="xs:string"/>
 	      <xs:element minOccurs="0" maxOccurs="1" name="S3PolicySig" type="xs:string"/>
@@ -478,6 +478,7 @@
 	      <xs:element minOccurs="0" name="uuid" type="xs:string"/>
 	      <xs:element minOccurs="0" maxOccurs="1" name="vlan" type="xs:int"/>
 	      <xs:element minOccurs="0" maxOccurs="1" name="netName" type="xs:string"/>
+          <xs:element minOccurs="0" maxOccurs="1" name="vmsubdomain" type="xs:string"/>
 	      <xs:element minOccurs="0" maxOccurs="1" name="nameserver" type="xs:string"/>
 	      <xs:element maxOccurs="unbounded" minOccurs="0" name="clusterControllers" type="xs:string"/>
 	      <xs:element minOccurs="0" maxOccurs="1" name="accountId" type="xs:string"/>
@@ -509,6 +510,25 @@
       </xs:complexType>
       
       <xs:complexType name="stopNetworkResponseType">
+	<xs:complexContent>
+	  <xs:extension base="tns:eucalyptusMessage">
+	    <xs:sequence>
+	    </xs:sequence>
+	  </xs:extension>
+	</xs:complexContent>
+      </xs:complexType>
+
+      <xs:complexType name="broadcastNetworkInfoType">
+	<xs:complexContent>
+	  <xs:extension base="tns:eucalyptusMessage">
+	    <xs:sequence>
+	      <xs:element minOccurs="1" maxOccurs="1" name="networkInfo" type="xs:string"/>
+	    </xs:sequence>
+	  </xs:extension>
+	</xs:complexContent>
+      </xs:complexType>
+      
+      <xs:complexType name="broadcastNetworkInfoResponseType">
 	<xs:complexContent>
 	  <xs:extension base="tns:eucalyptusMessage">
 	    <xs:sequence>
@@ -562,6 +582,7 @@
 	<xs:complexContent>
 	  <xs:extension base="tns:eucalyptusMessage">
 	    <xs:sequence>
+          <xs:element minOccurs="0" maxOccurs="1" name="vmsubdomain" type="xs:string"/>
 	      <xs:element minOccurs="0" maxOccurs="1" name="nameserver" type="xs:string"/>
 	      <xs:element maxOccurs="unbounded" minOccurs="0" name="clusterControllers" type="xs:string"/>
 	    </xs:sequence>
@@ -679,9 +700,11 @@
 	      <xs:element minOccurs="1" maxOccurs="unbounded" name="netNames" type="xs:string"/>
 	      <xs:element minOccurs="1" maxOccurs="unbounded" name="macAddresses" type="xs:string"/>
 	      <xs:element minOccurs="0" maxOccurs="unbounded" name="networkIndexList" type="xs:int"/>
+	      <xs:element minOccurs="0" maxOccurs="unbounded" name="privateIps" type="xs:string"/>
 	      <xs:element minOccurs="1" maxOccurs="unbounded" name="uuids" type="xs:string"/>
 	      <xs:element name="vlan" type="xs:int"/>
 	      <xs:element name="userData" type="xs:string"/>
+              <xs:element name="credential" type="xs:string"/>
 	      <xs:element name="launchIndex" type="xs:string"/>
 	      <xs:element minOccurs="0" name="platform" type="xs:string"/>
 	      <xs:element minOccurs="0" name="expiryTime" type="xs:dateTime"/>
@@ -991,6 +1014,9 @@
       <xs:element name="ConfigureNetwork" nillable="true" type="tns:configureNetworkType"/>
       <xs:element name="ConfigureNetworkResponse" nillable="true" type="tns:configureNetworkResponseType"/>
 
+      <xs:element name="BroadcastNetworkInfo" nillable="true" type="tns:broadcastNetworkInfoType"/>
+      <xs:element name="BroadcastNetworkInfoResponse" nillable="true" type="tns:broadcastNetworkInfoResponseType"/>
+
       <xs:element name="AssignAddress" nillable="true" type="tns:assignAddressType"/>
       <xs:element name="AssignAddressResponse" nillable="true" type="tns:assignAddressResponseType"/>
 
@@ -1125,6 +1151,11 @@
 
   <wsdl:message name="ConfigureNetworkResponse">
     <wsdl:part element="tns:ConfigureNetworkResponse" name="ConfigureNetworkResponse">
+    </wsdl:part>
+  </wsdl:message>
+
+  <wsdl:message name="BroadcastNetworkInfoResponse">
+    <wsdl:part element="tns:BroadcastNetworkInfoResponse" name="BroadcastNetworkInfoResponse">
     </wsdl:part>
   </wsdl:message>
 
@@ -1275,6 +1306,11 @@
 
   <wsdl:message name="ConfigureNetwork">
     <wsdl:part element="tns:ConfigureNetwork" name="ConfigureNetwork">
+    </wsdl:part>
+  </wsdl:message>
+
+  <wsdl:message name="BroadcastNetworkInfo">
+    <wsdl:part element="tns:BroadcastNetworkInfo" name="BroadcastNetworkInfo">
     </wsdl:part>
   </wsdl:message>
 
@@ -1478,6 +1514,13 @@
       <wsdl:input message="tns:ConfigureNetwork" name="ConfigureNetwork">
       </wsdl:input>
       <wsdl:output message="tns:ConfigureNetworkResponse" name="ConfigureNetworkResponse">
+      </wsdl:output>
+    </wsdl:operation>
+
+    <wsdl:operation name="BroadcastNetworkInfo">
+      <wsdl:input message="tns:BroadcastNetworkInfo" name="BroadcastNetworkInfo">
+      </wsdl:input>
+      <wsdl:output message="tns:BroadcastNetworkInfoResponse" name="BroadcastNetworkInfoResponse">
       </wsdl:output>
     </wsdl:operation>
 
@@ -1766,6 +1809,16 @@
         <soap:body use="literal"/>
       </wsdl:input>
       <wsdl:output name="ConfigureNetworkResponse">
+        <soap:body use="literal"/>
+      </wsdl:output>
+    </wsdl:operation>
+
+    <wsdl:operation name="BroadcastNetworkInfo">
+      <soap:operation soapAction="EucalyptusCC#BroadcastNetworkInfo" style="document"/>
+      <wsdl:input name="BroadcastNetworkInfo">
+        <soap:body use="literal"/>
+      </wsdl:input>
+      <wsdl:output name="BroadcastNetworkInfoResponse">
         <soap:body use="literal"/>
       </wsdl:output>
     </wsdl:operation>

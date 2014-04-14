@@ -310,7 +310,7 @@ adb_BundleInstanceResponse_t *BundleInstanceMarshal(adb_BundleInstance_t * bundl
     char *instanceId = NULL;
     char *bucketName = NULL;
     char *filePrefix = NULL;
-    char *walrusURL = NULL;
+    char *objectStorageURL = NULL;
     char *userPublicKey = NULL;
     char *S3Policy = NULL;
     char *S3PolicySig = NULL;
@@ -323,14 +323,14 @@ adb_BundleInstanceResponse_t *BundleInstanceMarshal(adb_BundleInstance_t * bundl
     instanceId = adb_bundleInstanceType_get_instanceId(bit, env);
     bucketName = adb_bundleInstanceType_get_bucketName(bit, env);
     filePrefix = adb_bundleInstanceType_get_filePrefix(bit, env);
-    walrusURL = adb_bundleInstanceType_get_walrusURL(bit, env);
+    objectStorageURL = adb_bundleInstanceType_get_objectStorageURL(bit, env);
     userPublicKey = adb_bundleInstanceType_get_userPublicKey(bit, env);
     S3Policy = adb_bundleInstanceType_get_S3Policy(bit, env);
     S3PolicySig = adb_bundleInstanceType_get_S3PolicySig(bit, env);
 
     status = AXIS2_TRUE;
     if (!DONOTHING) {
-        rc = doBundleInstance(&ccMeta, instanceId, bucketName, filePrefix, walrusURL, userPublicKey, S3Policy, S3PolicySig);
+        rc = doBundleInstance(&ccMeta, instanceId, bucketName, filePrefix, objectStorageURL, userPublicKey, S3Policy, S3PolicySig);
         if (rc) {
             LOGERROR("doBundleInstance() failed\n");
             status = AXIS2_FALSE;
@@ -653,7 +653,8 @@ adb_DescribeNetworksResponse_t *DescribeNetworksMarshal(adb_DescribeNetworks_t *
     char *incc = NULL;
     char statusMessage[256] = { 0 };
     char **clusterControllers = NULL;
-    char *nameserver = NULL;
+    char *vmsubdomain = NULL;
+    char *nameservers = NULL;
     char *vnetSubnet = NULL;
     char *vnetNetmask = NULL;
     int clusterControllersLen = 0;
@@ -665,7 +666,8 @@ adb_DescribeNetworksResponse_t *DescribeNetworksMarshal(adb_DescribeNetworks_t *
     snt = adb_DescribeNetworks_get_DescribeNetworks(describeNetworks, env);
     EUCA_MESSAGE_UNMARSHAL(describeNetworksType, snt, (&ccMeta));
 
-    nameserver = adb_describeNetworksType_get_nameserver(snt, env);
+    vmsubdomain = adb_describeNetworksType_get_vmsubdomain(snt, env);
+    nameservers = adb_describeNetworksType_get_nameserver(snt, env);
 
     clusterControllersLen = adb_describeNetworksType_sizeof_clusterControllers(snt, env);
     clusterControllers = EUCA_ZALLOC(clusterControllersLen, sizeof(char *));
@@ -677,7 +679,7 @@ adb_DescribeNetworksResponse_t *DescribeNetworksMarshal(adb_DescribeNetworks_t *
     snrt = adb_describeNetworksResponseType_create(env);
     status = AXIS2_TRUE;
     if (!DONOTHING) {
-        rc = doDescribeNetworks(&ccMeta, nameserver, clusterControllers, clusterControllersLen, outvnetConfig);
+        rc = doDescribeNetworks(&ccMeta, vmsubdomain, nameservers, clusterControllers, clusterControllersLen, outvnetConfig);
         if (rc) {
             LOGERROR("doDescribeNetworks() failed with %d\n", rc);
             status = AXIS2_FALSE;
@@ -824,6 +826,60 @@ adb_DescribePublicAddressesResponse_t *DescribePublicAddressesMarshal(adb_Descri
 
     ret = adb_DescribePublicAddressesResponse_create(env);
     adb_DescribePublicAddressesResponse_set_DescribePublicAddressesResponse(ret, env, dpart);
+    return (ret);
+}
+
+//!
+//! Process the broadcastNetworkInfo request and provides the response
+//!
+//! @param[in] broadcastNetworkInfo a pointer to the broadcastNetworkInfo message structure
+//! @param[in] env pointer to the AXIS2 environment structure
+//!
+//! @return
+//!
+//! @pre
+//!
+//! @note
+//!
+adb_BroadcastNetworkInfoResponse_t *BroadcastNetworkInfoMarshal(adb_BroadcastNetworkInfo_t * broadcastNetworkInfo, const axutil_env_t * env)
+{
+    adb_BroadcastNetworkInfoResponse_t *ret = NULL;
+    adb_broadcastNetworkInfoResponseType_t *response = NULL;
+    adb_broadcastNetworkInfoType_t *input = NULL;
+    int rc = 0;
+    axis2_bool_t status = AXIS2_TRUE;
+    char statusMessage[256] = { 0 };
+    char *networkInfo = NULL;
+    ncMetadata ccMeta = { 0 };
+
+    input = adb_BroadcastNetworkInfo_get_BroadcastNetworkInfo(broadcastNetworkInfo, env);
+
+    EUCA_MESSAGE_UNMARSHAL(broadcastNetworkInfoType, input, (&ccMeta));
+
+    networkInfo = adb_broadcastNetworkInfoType_get_networkInfo(input, env);
+
+    status = AXIS2_TRUE;
+    if (!DONOTHING) {
+        rc = doBroadcastNetworkInfo(&ccMeta, networkInfo);
+        if (rc) {
+            LOGERROR("doBroadcastNetworkInfo() failed\n");
+            status = AXIS2_FALSE;
+            snprintf(statusMessage, 255, "ERROR");
+        }
+    }
+
+    response = adb_broadcastNetworkInfoResponseType_create(env);
+    adb_broadcastNetworkInfoResponseType_set_return(response, env, status);
+    if (status == AXIS2_FALSE) {
+        adb_broadcastNetworkInfoResponseType_set_statusMessage(response, env, statusMessage);
+    }
+
+    adb_broadcastNetworkInfoResponseType_set_correlationId(response, env, ccMeta.correlationId);
+    adb_broadcastNetworkInfoResponseType_set_userId(response, env, ccMeta.userId);
+
+    ret = adb_BroadcastNetworkInfoResponse_create(env);
+    adb_BroadcastNetworkInfoResponse_set_BroadcastNetworkInfoResponse(ret, env, response);
+
     return (ret);
 }
 
@@ -1175,7 +1231,8 @@ adb_StartNetworkResponse_t *StartNetworkMarshal(adb_StartNetwork_t * startNetwor
     char statusMessage[256] = { 0 };
     char *netName = NULL;
     char **clusterControllers = NULL;
-    char *nameserver = NULL;
+    char *vmsubdomain = NULL;
+    char *nameservers = NULL;
     char *uuid = NULL;
     char *accountId = NULL;
     int vlan = 0;
@@ -1187,7 +1244,8 @@ adb_StartNetworkResponse_t *StartNetworkMarshal(adb_StartNetwork_t * startNetwor
 
     vlan = adb_startNetworkType_get_vlan(snt, env);
     netName = adb_startNetworkType_get_netName(snt, env);
-    nameserver = adb_startNetworkType_get_nameserver(snt, env);
+    vmsubdomain = adb_startNetworkType_get_vmsubdomain(snt, env);
+    nameservers = adb_startNetworkType_get_nameserver(snt, env);
     uuid = adb_startNetworkType_get_uuid(snt, env);
     accountId = adb_startNetworkType_get_accountId(snt, env);
     if (!accountId) {
@@ -1203,7 +1261,7 @@ adb_StartNetworkResponse_t *StartNetworkMarshal(adb_StartNetwork_t * startNetwor
     snrt = adb_startNetworkResponseType_create(env);
     status = AXIS2_TRUE;
     if (!DONOTHING) {
-        rc = doStartNetwork(&ccMeta, accountId, uuid, netName, vlan, nameserver, clusterControllers, clusterControllersLen);
+        rc = doStartNetwork(&ccMeta, accountId, uuid, netName, vlan, vmsubdomain, nameservers, clusterControllers, clusterControllersLen);
         if (rc) {
             LOGERROR("doStartNetwork() failed with %d\n", rc);
             status = AXIS2_FALSE;
@@ -1534,6 +1592,7 @@ adb_RunInstancesResponse_t *RunInstancesMarshal(adb_RunInstances_t * runInstance
     int instIdsLen = 0;
     int netNamesLen = 0;
     int macAddrsLen = 0;
+    int privateIpsLen = 0;
     int *networkIndexList = NULL;
     int networkIndexListLen = 0;
     int uuidsLen = 0;
@@ -1546,6 +1605,7 @@ adb_RunInstancesResponse_t *RunInstancesMarshal(adb_RunInstances_t * runInstance
     char *reservationId = NULL;
     char **netNames = NULL;
     char **macAddrs = NULL;
+    char **privateIps = NULL;
     char *kernelId = NULL;
     char *ramdiskId = NULL;
     char *emiURL = NULL;
@@ -1553,6 +1613,7 @@ adb_RunInstancesResponse_t *RunInstancesMarshal(adb_RunInstances_t * runInstance
     char *ramdiskURL = NULL;
     char *vmName = NULL;
     char *userData = NULL;
+    char *credential = NULL;
     char *launchIndex = NULL;
     char *platform = NULL;
     char *tmp = NULL;
@@ -1586,6 +1647,12 @@ adb_RunInstancesResponse_t *RunInstancesMarshal(adb_RunInstances_t * runInstance
     } else {
         userData = strdup(tmp);
     }
+    tmp = adb_runInstancesType_get_credential(rit, env);
+    if (!tmp) {
+        credential = strdup("");
+    } else {
+        credential = strdup(tmp);
+    }
 
     launchIndex = adb_runInstancesType_get_launchIndex(rit, env);
     platform = adb_runInstancesType_get_platform(rit, env);
@@ -1605,6 +1672,16 @@ adb_RunInstancesResponse_t *RunInstancesMarshal(adb_RunInstances_t * runInstance
     for (i = 0; i < instIdsLen; i++) {
         instIds[i] = adb_runInstancesType_get_instanceIds_at(rit, env, i);
     }
+
+    privateIpsLen = adb_runInstancesType_sizeof_privateIps(rit, env);
+    privateIps = EUCA_ZALLOC(privateIpsLen, sizeof(char *));
+    for (i = 0; i < privateIpsLen; i++) {
+        privateIps[i] = adb_runInstancesType_get_privateIps_at(rit, env, i);
+    }
+    // DAN TEMPORARY
+    //    privateIpsLen = 1;
+    //    privateIps = EUCA_ZALLOC(privateIpsLen, sizeof(char *));
+    //    privateIps[0] = strdup("10.111.101.156");
 
     netNamesLen = adb_runInstancesType_sizeof_netNames(rit, env);
     netNames = EUCA_ZALLOC(netNamesLen, sizeof(char *));
@@ -1649,8 +1726,8 @@ adb_RunInstancesResponse_t *RunInstancesMarshal(adb_RunInstances_t * runInstance
     rc = 1;
     if (!DONOTHING) {
         rc = doRunInstances(&ccMeta, emiId, kernelId, ramdiskId, emiURL, kernelURL, ramdiskURL, instIds, instIdsLen, netNames, netNamesLen, macAddrs,
-                            macAddrsLen, networkIndexList, networkIndexListLen, uuids, uuidsLen, minCount, maxCount, accountId, ownerId,
-                            reservationId, &ccvm, keyName, vlan, userData, launchIndex, platform, expiryTime, NULL, &outInsts, &outInstsLen);
+                            macAddrsLen, networkIndexList, networkIndexListLen, uuids, uuidsLen, privateIps, privateIpsLen, minCount, maxCount, accountId, ownerId,
+                            reservationId, &ccvm, keyName, vlan, userData, credential, launchIndex, platform, expiryTime, NULL, &outInsts, &outInstsLen);
     }
 
     if (rc) {
@@ -1683,6 +1760,7 @@ adb_RunInstancesResponse_t *RunInstancesMarshal(adb_RunInstances_t * runInstance
     EUCA_FREE(networkIndexList);
     EUCA_FREE(macAddrs);
     EUCA_FREE(netNames);
+    EUCA_FREE(privateIps);
     EUCA_FREE(instIds);
     EUCA_FREE(userData);
     EUCA_FREE(uuids);

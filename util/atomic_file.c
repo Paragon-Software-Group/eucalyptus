@@ -163,7 +163,7 @@
 //!
 //! @note
 //!
-int atomic_file_init(atomic_file * file, char *source, char *dest)
+int atomic_file_init(atomic_file * file, char *source, char *dest, int dosort)
 {
     if (!file) {
         return (1);
@@ -171,12 +171,13 @@ int atomic_file_init(atomic_file * file, char *source, char *dest)
 
     atomic_file_free(file);
 
-    snprintf(file->dest, MAX_PATH, "%s", dest);
-    snprintf(file->source, MAX_PATH, "%s", source);
-    snprintf(file->tmpfilebase, MAX_PATH, "%s-XXXXXX", dest);
-    snprintf(file->tmpfile, MAX_PATH, "%s-XXXXXX", dest);
+    snprintf(file->dest, EUCA_MAX_PATH, "%s", dest);
+    snprintf(file->source, EUCA_MAX_PATH, "%s", source);
+    snprintf(file->tmpfilebase, EUCA_MAX_PATH, "%s-XXXXXX", dest);
+    snprintf(file->tmpfile, EUCA_MAX_PATH, "%s-XXXXXX", dest);
     file->lasthash = strdup("UNSET");
     file->currhash = strdup("UNSET");
+    file->dosort = dosort;
     return (0);
 }
 
@@ -205,9 +206,9 @@ int atomic_file_get(atomic_file * file, int *file_updated)
     char *hash = NULL;
     char type[32] = "";
     char hostname[512] = "";
-    char path[MAX_PATH] = "";
-    char tmpsource[MAX_PATH] = "";
-    char tmppath[MAX_PATH] = "";
+    char path[EUCA_MAX_PATH] = "";
+    char tmpsource[EUCA_MAX_PATH] = "";
+    char tmppath[EUCA_MAX_PATH] = "";
 
     if (!file || !file_updated) {
         return (1);
@@ -216,47 +217,49 @@ int atomic_file_get(atomic_file * file, int *file_updated)
     ret = 0;
     *file_updated = 0;
 
-    snprintf(file->tmpfile, MAX_PATH, "%s", file->tmpfilebase);
+    snprintf(file->tmpfile, EUCA_MAX_PATH, "%s", file->tmpfilebase);
     fd = safe_mkstemp(file->tmpfile);
     if (fd < 0) {
-        LOGERROR("cannot open tmpfile '%s'\n", file->tmpfile);
+        LOGERROR("cannot open tmpfile '%s': check permissions\n", file->tmpfile);
         return (1);
     }
-    chmod(file->tmpfile, 0644);
+    chmod(file->tmpfile, 0600);
     close(fd);
 
-    snprintf(tmpsource, MAX_PATH, "%s", file->source);
+    snprintf(tmpsource, EUCA_MAX_PATH, "%s", file->source);
     type[0] = tmppath[0] = path[0] = hostname[0] = '\0';
     port = 0;
 
     tokenize_uri(tmpsource, type, hostname, &port, tmppath);
-    snprintf(path, MAX_PATH, "/%s", tmppath);
+    snprintf(path, EUCA_MAX_PATH, "/%s", tmppath);
 
     if (!strcmp(type, "http")) {
         rc = http_get_timeout(file->source, file->tmpfile, 0, 0, 10, 15);
         if (rc) {
-            LOGERROR("http client failed to fetch file URL=%s\n", file->source);
+            LOGERROR("http client failed to fetch file URL=%s: check http server status\n", file->source);
             ret = 1;
         }
     } else if (!strcmp(type, "file")) {
         if (!strlen(path) || copy_file(path, file->tmpfile)) {
-            LOGERROR("could not copy source file (%s) to dest file (%s)\n", path, file->tmpfile);
+            LOGERROR("could not copy source file (%s) to dest file (%s): check permissions\n", path, file->tmpfile);
             ret = 1;
         }
     } else {
-        LOGWARN("BUG: incompatible URI type (only support http, file): (%s)\n", type);
+        LOGWARN("BUG: incompatible URI type (%s) passed to routine (only supports http, file)\n", type);
         ret = 1;
     }
 
     if (!ret) {
-        rc = atomic_file_sort_tmpfile(file);
-        if (rc) {
-            LOGWARN("could not sort tmpfile (%s) inplace\n", file->tmpfile);
+        if (file->dosort) {
+            rc = atomic_file_sort_tmpfile(file);
+            if (rc) {
+                LOGWARN("could not sort tmpfile (%s) inplace: continuing without sort\n", file->tmpfile);
+            }
         }
         // do checksum - only copy if file has changed
         hash = file2md5str(file->tmpfile);
         if (!hash) {
-            LOGERROR("could not compute hash of tmpfile (%s)\n", file->tmpfile);
+            LOGERROR("could not compute hash of tmpfile (%s): check permissions\n", file->tmpfile);
             ret = 1;
         } else {
             if (file->currhash)
@@ -264,10 +267,11 @@ int atomic_file_get(atomic_file * file, int *file_updated)
             file->currhash = hash;
             if (check_file(file->dest) || strcmp(file->currhash, file->lasthash)) {
                 // hashes are different, put new file in place
-                LOGINFO("source and destination file contents have changed, triggering update of dest (%s)\n", file->dest);
+                LOGINFO("update triggered due to file update (%s)\n", file->dest);
+                LOGDEBUG("source and destination file contents have become different, triggering update of dest (%s)\n", file->dest);
                 LOGDEBUG("renaming file %s -> %s\n", file->tmpfile, file->dest);
                 if (rename(file->tmpfile, file->dest)) {
-                    LOGERROR("could not rename local copy to dest (%s -> %s)\n", file->tmpfile, file->dest);
+                    LOGERROR("could not rename (move) source file '%s' to dest file '%s': check permissions\n", file->tmpfile, file->dest);
                     ret = 1;
                 } else {
                     EUCA_FREE(file->lasthash);
@@ -299,23 +303,22 @@ int atomic_file_get(atomic_file * file, int *file_updated)
 //!
 int atomic_file_sort_tmpfile(atomic_file * file)
 {
-    int cmp = 0;
     int currlines = 0;
     int i = 0;
     int fd = 0;
     int ret = 0;
     char **contents = NULL;
     char buf[4096] = "";
-    char tmpfile[MAX_PATH] = "";
+    char tmpfile[EUCA_MAX_PATH] = "";
     FILE *IFH = NULL;
     FILE *OFH = NULL;
 
-    snprintf(tmpfile, MAX_PATH, "%s-XXXXXX", file->dest);
+    snprintf(tmpfile, EUCA_MAX_PATH, "%s-XXXXXX", file->dest);
     if ((fd = safe_mkstemp(tmpfile)) < 0) {
-        LOGERROR("cannot open tmpfile '%s'\n", tmpfile);
+        LOGERROR("cannot open tmpfile '%s': check permissions\n", tmpfile);
         return (1);
     }
-    chmod(tmpfile, 0644);
+    chmod(tmpfile, 0600);
     close(fd);
 
     buf[0] = '\0';

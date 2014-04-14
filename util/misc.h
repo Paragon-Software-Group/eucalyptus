@@ -100,10 +100,6 @@
 
 //! @}
 
-#ifndef MAX_PATH
-#define MAX_PATH                                 4096
-#endif /* ! MAX_PATH */
-
 /*----------------------------------------------------------------------------*\
  |                                                                            |
  |                                  TYPEDEFS                                  |
@@ -153,7 +149,7 @@ int killwait(pid_t pid);
 int param_check(const char *func, ...);
 int check_process(pid_t pid, char *search);
 char *system_output(char *shell_command);
-char *getConfString(char configFiles[][MAX_PATH], int numFiles, char *key);
+char *getConfString(char configFiles[][EUCA_MAX_PATH], int numFiles, char *key);
 int get_conf_var(const char *path, const char *name, char **value);
 void free_char_list(char **value);
 char **from_var_to_char_list(const char *v);
@@ -179,7 +175,7 @@ int drop_privs(void);
 int timeshell(char *command, char *stdout_str, char *stderr_str, int max_size, int timeout);
 int get_remoteDevForNC(const char *the_iqn, const char *remoteDev, char *remoteDevForNC, int remoteDevForNCLen);
 int check_for_string_in_list(char *string, char **list, int count);
-int euca_execlp(const char *file, ...);
+int euca_execlp(int *pStatus, const char *file, ...);
 
 /*----------------------------------------------------------------------------*\
  |                                                                            |

@@ -634,7 +634,7 @@ int cc_createImage(char *volumeId, char *instanceId, char *remoteDev, axutil_env
 //! @param[in] instanceId the instance identifier string (i-XXXXXXXX)
 //! @param[in] bucketName the name of the bucket to store the bundle
 //! @param[in] filePrefix the prefix string for the bundle file
-//! @param[in] walrusURL the address of the WALRUS where the bucket lives (as an URL)
+//! @param[in] objectStorageURL the address of the ObjectStorage where the bucket lives (as an URL)
 //! @param[in] userPublicKey the public key
 //! @param[in] env pointer to the AXIS2 environment structure
 //! @param[in] pStub a pointer to the AXIS2 stub structure
@@ -645,7 +645,7 @@ int cc_createImage(char *volumeId, char *instanceId, char *remoteDev, axutil_env
 //!
 //! @note
 //!
-int cc_bundleInstance(char *instanceId, char *bucketName, char *filePrefix, char *walrusURL, char *userPublicKey, axutil_env_t * env, axis2_stub_t * pStub)
+int cc_bundleInstance(char *instanceId, char *bucketName, char *filePrefix, char *objectStorageURL, char *userPublicKey, axutil_env_t * env, axis2_stub_t * pStub)
 {
     int i = 0;
     adb_BundleInstance_t *input = NULL;
@@ -670,7 +670,7 @@ int cc_bundleInstance(char *instanceId, char *bucketName, char *filePrefix, char
     adb_bundleInstanceType_set_instanceId(sn, env, instanceId);
     adb_bundleInstanceType_set_bucketName(sn, env, bucketName);
     adb_bundleInstanceType_set_filePrefix(sn, env, filePrefix);
-    adb_bundleInstanceType_set_walrusURL(sn, env, walrusURL);
+    adb_bundleInstanceType_set_objectStorageURL(sn, env, objectStorageURL);
     adb_bundleInstanceType_set_userPublicKey(sn, env, userPublicKey);
 
     adb_BundleInstance_set_BundleInstance(input, env, sn);
@@ -742,6 +742,48 @@ int cc_bundleRestartInstance(char *instanceId, axutil_env_t * env, axis2_stub_t 
 
     snrt = adb_BundleRestartInstanceResponse_get_BundleRestartInstanceResponse(output, env);
     printf("bundleRestartInstance returned status %d\n", adb_bundleRestartInstanceResponseType_get_return(snrt, env));
+    return (0);
+}
+
+//!
+//! Marshalls and invokes the broadcast network info request
+//!
+//! @param[in] networkInfo
+//! @param[in] env pointer to the AXIS2 environment structure
+//! @param[in] pStub a pointer to the AXIS2 stub structure
+//!
+//! @return
+//!
+//! @pre
+//!
+//! @note
+//!
+int cc_broadcastNetworkInfo(char *networkInfo, axutil_env_t * env, axis2_stub_t * pStub)
+{
+    char *networkInfoFileBuf = NULL, *networkInfoBuf = NULL;
+    adb_BroadcastNetworkInfo_t *input = NULL;
+    adb_BroadcastNetworkInfoResponse_t *output = NULL;
+    adb_broadcastNetworkInfoType_t *sn = NULL;
+    adb_broadcastNetworkInfoResponseType_t *snrt = NULL;
+
+    networkInfoFileBuf = file2str(networkInfo);
+    networkInfoBuf = base64_enc(((u8 *) networkInfoFileBuf), strlen(networkInfoFileBuf));
+
+    sn = adb_broadcastNetworkInfoType_create(env);
+    input = adb_BroadcastNetworkInfo_create(env);
+
+    EUCA_MESSAGE_MARSHAL(broadcastNetworkInfoType, sn, (&mymeta));
+    adb_broadcastNetworkInfoType_set_networkInfo(sn, env, networkInfoBuf);
+
+    adb_BroadcastNetworkInfo_set_BroadcastNetworkInfo(input, env, sn);
+
+    output = axis2_stub_op_EucalyptusCC_BroadcastNetworkInfo(pStub, env, input);
+    if (!output) {
+        printf("ERROR: broadcastNetworkInfo returned NULL\n");
+        return (1);
+    }
+    snrt = adb_BroadcastNetworkInfoResponse_get_BroadcastNetworkInfoResponse(output, env);
+    printf("broadcastNetworkInfo returned status %d\n", adb_broadcastNetworkInfoResponseType_get_return(snrt, env));
     return (0);
 }
 
@@ -980,6 +1022,7 @@ int cc_describeNetworks(char *nameserver, char **ccs, int ccsLen, axutil_env_t *
            adb_describeNetworksResponseType_get_addrsPerNet(snrt, env), adb_describeNetworksResponseType_get_addrIndexMin(snrt, env),
            adb_describeNetworksResponseType_get_addrIndexMax(snrt, env), adb_describeNetworksResponseType_get_vlanMin(snrt, env),
            adb_describeNetworksResponseType_get_vlanMax(snrt, env));
+
     {
         numnets = adb_describeNetworksResponseType_sizeof_activeNetworks(snrt, env);
         printf("found %d active nets\n", numnets);

@@ -109,6 +109,26 @@
 
 #define FILENAME                                 512    //!< Maximum filename length
 
+#ifndef IV_LENGTH
+#define IV_LENGTH                                 12
+#endif /* ! IV_LENGTH */
+
+#ifndef SYMMETRIC_KEY_LENGTH
+#define SYMMETRIC_KEY_LENGTH                      32
+#endif /* ! SYMMETRIC_KEY_LENGTH */
+
+#ifndef MAX_ENCRYPTED_STRING_LEN
+#define MAX_ENCRYPTED_STRING_LEN                8192
+#endif /* ! MAX_ENCRYPTED_STRING_LEN */
+
+#ifndef TAG_LENGTH
+#define TAG_LENGTH                                16
+#endif /* ! TAG_LENGTH */
+
+#ifndef MAX_DECRYPTED_STRING_LEN
+#define MAX_DECRYPTED_STRING_LEN                8192
+#endif /* ! MAX_DECRYPTED_STRING_LEN */
+
 /*----------------------------------------------------------------------------*\
  |                                                                            |
  |                                  TYPEDEFS                                  |
@@ -203,6 +223,7 @@ int euca_init_cert(void)
 {                                              \
 	if ((fd = open((_n), O_RDONLY)) < 0) {     \
 		LOGERROR(ERR_MSG, (_n));               \
+		pthread_mutex_unlock(&init_mutex);     \
 		return (EUCA_ERROR);                   \
 	} else {                                   \
 		close(fd);                             \
@@ -223,7 +244,7 @@ int euca_init_cert(void)
     if (initialized) {
         //Previous holder of lock initialized, so this thread can skip
         pthread_mutex_unlock(&init_mutex);
-        return 0;
+        return (EUCA_OK);
     }
 
     if ((euca_home = getenv("EUCALYPTUS")) == NULL) {
@@ -262,6 +283,302 @@ int euca_init_cert(void)
 #undef CHK_FILE
 }
 
+//! At first, decrypt the symmetric key in key_buffer using NC private key and use the symmetric key to decrypt the input string
+//! Note the first 32 bytes of input string contains iv string (the remaining string is actual cipher text)
+//!
+//! @param[in] in_buffer - String that is base64 encoded and encrypted cipher-text
+//! @param[in] key_buffer - String that contians symmetric key for decryption. Base-64 encoded
+//! @param[in] out_buffer - Pointer to pointer where the result will be placed. Caller is responsible for freeing
+//! @param[in] out_len - Length of the decrypted string
+//!
+//! @return EUCA_OK if operation was successful and *out_buffer has a value. EUCA_ERROR otherwise.
+//!
+//! @pre in_buffer contains a valid null-terminated string that is a Base-64 encoded cipher-text from an symmetric encryption using the symmetric key in key_buffer
+//!
+//! @post *out_buffer points to the base64 decoded, decrypted string in plain text
+int decrypt_string_with_node_and_symmetric_key(char *in_buffer, char *key_buffer, char **out_buffer, int *out_len)
+{
+    int cipher_len = -1;
+    int ret = EUCA_ERROR;
+    int len = -1;
+    char *symm_key = NULL;
+    char *dec64_in = NULL;
+    char *enc64_key = NULL;
+    char iv_buffer[IV_LENGTH + 1] = "";
+    char *cipher_text = NULL;
+    char *enc64_cipher_text = NULL;
+
+    if (in_buffer == NULL || strlen(in_buffer) <= 0) {
+        LOGERROR("No string to decrypt is given\n");
+        ret = EUCA_ERROR;
+        goto cleanup;
+    }
+
+    if (key_buffer == NULL || strlen(key_buffer) <= 0) {
+        LOGERROR("No key string is given\n");
+        ret = EUCA_ERROR;
+        goto cleanup;
+    }
+
+    if (decrypt_string_with_node(key_buffer, &symm_key) != EUCA_OK) {
+        LOGERROR("Failed to decrypt the symmetric key\n");
+        ret = EUCA_ERROR;
+        goto cleanup;
+    }
+
+    if ((enc64_key = base64_enc((unsigned char *)symm_key, SYMMETRIC_KEY_LENGTH)) == NULL) {
+        LOGERROR("Failed to encode the key string\n");
+        ret = EUCA_ERROR;
+        goto cleanup;
+    }
+
+    dec64_in = base64_dec2((unsigned char *)in_buffer, strlen(in_buffer), &len);
+    if (dec64_in == NULL || len <= 0) {
+        LOGERROR("Failed to decode the input string\n");
+        ret = EUCA_ERROR;
+        goto cleanup;
+    }
+    // the first IV_LENGTH bytes are IV
+    memcpy(iv_buffer, dec64_in, IV_LENGTH);
+    cipher_len = len - IV_LENGTH;
+    if (cipher_len <= 0) {
+        LOGERROR("No ciphertext is found\n");
+        ret = EUCA_ERROR;
+        goto cleanup;
+    }
+
+    if ((cipher_text = EUCA_ZALLOC(cipher_len + 1, sizeof(char))) == NULL) {
+        LOGERROR("Calloc failed \n");
+        ret = EUCA_ERROR;
+        goto cleanup;
+    } else {
+        bzero(cipher_text, cipher_len + 1);
+    }
+
+    memcpy(cipher_text, dec64_in + IV_LENGTH, cipher_len);
+    enc64_cipher_text = base64_enc((unsigned char *)cipher_text, cipher_len);
+    if (enc64_cipher_text == NULL) {
+        LOGERROR("Failed to encode the cipher text\n");
+        ret = EUCA_ERROR;
+        goto cleanup;
+    }
+
+    if (decrypt_string_symmetric(enc64_cipher_text, enc64_key, iv_buffer, out_buffer, out_len) != EUCA_OK) {
+        LOGERROR("Failed to decrypt the input string\n");
+        ret = EUCA_ERROR;
+        goto cleanup;
+    }
+
+    ret = EUCA_OK;
+
+cleanup:
+    EUCA_FREE(symm_key);
+    EUCA_FREE(dec64_in);
+    EUCA_FREE(enc64_key);
+    EUCA_FREE(cipher_text);
+    EUCA_FREE(enc64_cipher_text);
+    if (ret != EUCA_OK) {
+        EUCA_FREE(*out_buffer);
+    }
+    return ret;
+}
+
+//! Encrypt the buffer using the symmetric key passed in key_buffer. in_buffer must be a null-terminated string.
+//! Result is placed in *out_buffer on the heap and the caller is responsible for freeing.
+//!
+//! @param[in] in_buffer - Base64-encoded string that is to be encrypted
+//! @param[in] key_buffer - Base64-encoded string that contains symmetric key
+//! @param[in] iv_buffer - The string buffer that contains initialization vector (length defined by IV_LENGTH)
+//! @param[out] out_buffer - Pointer to pointer where base64-encoded result will be placed. Null-terminated string. Caller is responsible for freeing
+//!
+//! @return EUCA_OK if operation was successful and *out_buffer has a value. EUCA_ERROR otherwise.
+//!
+//! @pre in_buffer contains a valid null-terminated string that is a Base-64 encoded cipher-text
+//!
+//! @post *out_buffer points to the base64-encoded, encrypted string
+//
+//! WARNING: symmetric encryption is not fully tested with decrypt_string_symmetric(..). May need to consider tag stream
+int encrypt_string_symmetric(char *in_buffer, char *key_buffer, char *iv_buffer, char **out_buffer, int *out_len)
+{
+    int len = -1;
+    int key_len = -1;
+    int in_len = -1;
+    int ret = -1;
+    char *dec64_key = NULL;
+    char *dec64_in = NULL;
+    char encrypted[MAX_ENCRYPTED_STRING_LEN] = "";
+    EVP_CIPHER_CTX ctx = { 0 };
+
+    dec64_key = base64_dec2((unsigned char *)key_buffer, strlen(key_buffer), &len);
+    if (dec64_key == NULL || len <= 0) {
+        LOGERROR("Base64 decode of key string failed\n");
+        ret = EUCA_ERROR;
+        goto cleanup;
+    }
+
+    key_len = len;
+    dec64_in = base64_dec2((unsigned char *)in_buffer, strlen(in_buffer), &len);
+    if (dec64_in == NULL || len <= 0) {
+        LOGERROR("Base64 decode of input string failed\n");
+        ret = EUCA_ERROR;
+        goto cleanup;
+    }
+    in_len = len;
+
+    EVP_CIPHER_CTX_init(&ctx);
+    EVP_EncryptInit_ex(&ctx, EVP_aes_256_gcm(), NULL, (unsigned char *)dec64_key, (unsigned char *)iv_buffer);
+    EVP_CIPHER_CTX_set_key_length(&ctx, key_len);
+    EVP_CIPHER_CTX_ctrl(&ctx, EVP_CTRL_GCM_SET_IVLEN, IV_LENGTH, NULL);
+    EVP_CIPHER_CTX_set_padding(&ctx, 0);
+
+    if (!EVP_EncryptUpdate(&ctx, (unsigned char *)encrypted + IV_LENGTH, out_len, (unsigned char *)dec64_in, in_len)) {
+        LOGERROR("Cipher update failed\n");
+        ret = EUCA_ERROR;
+        goto cleanup;
+    }
+
+    if (!EVP_EncryptFinal_ex(&ctx, (unsigned char *)encrypted + IV_LENGTH, &len)) {
+        ERR_print_errors_fp(stderr);
+        ret = EUCA_ERROR;
+        LOGERROR("Cipher final failed\n");
+        goto cleanup;
+    }
+
+    memcpy(encrypted, iv_buffer, IV_LENGTH);
+    *out_len += len;
+    *out_len += IV_LENGTH;
+    *out_buffer = base64_enc((unsigned char *)encrypted, *out_len);
+
+    ret = EUCA_OK;
+
+cleanup:
+    EUCA_FREE(dec64_key);
+    EUCA_FREE(dec64_in);
+    if (ret != EUCA_OK) {
+        EUCA_FREE(*out_buffer);
+    }
+    EVP_CIPHER_CTX_cleanup(&ctx);
+    return ret;
+}
+
+//! Decrypt the buffer using the symmetric key passed in key_buffer. in_buffer must be a null-terminated string.
+//! Result is placed in *out_buffer on the heap and the caller is responsible for freeing.
+//!
+//! @param[in] in_buffer - String that is base64 encoded and encrypted cipher-text
+//! @param[in] key_buffer - The string buffer that contains symmetric key for decryption. Base-64 encoded.
+//! @param[in] iv_buffer - The string buffer that contains initialization vector
+//! @param[out] out_buffer - Pointer to pointer where the result will be placed. Caller is responsible for freeing
+//! @param[out] out_len - Pointer to integer number that is the length of decrypted string
+//!
+//! @return EUCA_OK if operation was successful and *out_buffer has a value. EUCA_ERROR otherwise.
+//!
+//! @pre in_buffer contains a valid null-terminated string that is a Base-64 encoded cipher-text from an symmetric encryption using the symmetric key in key_buffer
+//!
+//! @post *out_buffer points to the base64 decoded, decrypted string in plain text
+int decrypt_string_symmetric(char *in_buffer, char *key_buffer, char *iv_buffer, char **out_buffer, int *out_len)
+{
+    int ret = EUCA_ERROR;
+    int len = -1;
+    int in_len = -1;
+    int key_len = -1;
+    int cipher_init = FALSE;
+    int cipher_len = -1;
+    char *dec64_in = NULL;
+    char *dec64_key = NULL;
+    char decrypted_str[MAX_DECRYPTED_STRING_LEN] = "";  // MAX encrypted data length
+    char *cipher_text = NULL;
+    char *tag = NULL;
+    EVP_CIPHER_CTX ctx = { 0 };
+
+    if (in_buffer == NULL || strlen(in_buffer) <= 0) {
+        LOGERROR("No input string to decrypt\n");
+        ret = EUCA_ERROR;
+        goto cleanup;
+    }
+
+    if (key_buffer == NULL || strlen(key_buffer) <= 0) {
+        LOGERROR("No key string\n");
+        ret = EUCA_ERROR;
+        goto cleanup;
+    }
+    //Base64 decode the string inbuffer, null terminator deducted from buffer size
+    dec64_in = base64_dec2((unsigned char *)in_buffer, strlen(in_buffer), &in_len);
+    if (dec64_in == NULL) {
+        LOGERROR("Base64 decode of input string failed\n");
+        ret = EUCA_ERROR;
+        goto cleanup;
+    }
+    cipher_len = in_len - TAG_LENGTH;
+    if (cipher_len <= 0) {
+        LOGERROR("No cipher text\n");
+        ret = EUCA_ERROR;
+        goto cleanup;
+    }
+    cipher_text = dec64_in;
+    tag = dec64_in + cipher_len;
+
+    dec64_key = base64_dec2((unsigned char *)key_buffer, strlen(key_buffer), &key_len);
+    if (dec64_key == NULL || key_len <= 0) {
+        LOGERROR("Base64 decode of key string failed\n");
+        ret = EUCA_ERROR;
+        goto cleanup;
+    }
+
+    EVP_CIPHER_CTX_init(&ctx);
+    cipher_init = TRUE;
+    EVP_DecryptInit_ex(&ctx, EVP_aes_256_gcm(), NULL, (unsigned char *)dec64_key, (unsigned char *)iv_buffer);
+    EVP_CIPHER_CTX_set_key_length(&ctx, key_len);
+    EVP_CIPHER_CTX_ctrl(&ctx, EVP_CTRL_GCM_SET_IVLEN, IV_LENGTH, NULL);
+    EVP_CIPHER_CTX_set_padding(&ctx, 0);
+
+    if (!EVP_DecryptUpdate(&ctx, (unsigned char *)decrypted_str, &len, (unsigned char *)cipher_text, cipher_len)) {
+        ret = EUCA_ERROR;
+        LOGERROR("Cipher update failed\n");
+        goto cleanup;
+    }
+
+    if (!EVP_CIPHER_CTX_ctrl(&ctx, EVP_CTRL_GCM_SET_TAG, TAG_LENGTH, tag)) {
+        ret = EUCA_ERROR;
+        LOGERROR("Failed to set tag\n");
+        goto cleanup;
+    }
+
+    *out_len = len;
+    if (!EVP_DecryptFinal_ex(&ctx, (unsigned char *)decrypted_str + len, &len)) {
+        ret = EUCA_ERROR;
+        LOGERROR("Cipher final failed\n");
+        goto cleanup;
+    }
+
+    *out_len += len;
+    if (*out_len > MAX_DECRYPTED_STRING_LEN) {
+        ret = EUCA_ERROR;
+        LOGERROR("Decrypted string length exceeds max\n");
+        goto cleanup;
+    }
+
+    if ((*out_buffer = EUCA_ZALLOC(*out_len + 1, sizeof(char))) == NULL) {
+        LOGERROR("Calloc failed\n");
+        ret = EUCA_ERROR;
+        goto cleanup;
+    } else {
+        bzero(*out_buffer, *out_len + 1);
+        strncpy(*out_buffer, decrypted_str, *out_len);
+    }
+    ret = EUCA_OK;
+
+cleanup:
+    EUCA_FREE(dec64_in);
+    EUCA_FREE(dec64_key);
+    if (ret != EUCA_OK) {
+        EUCA_FREE(*out_buffer);
+    }
+
+    if (cipher_init)
+        EVP_CIPHER_CTX_cleanup(&ctx);
+    return ret;
+}
+
 //! Decrypt the buffer using the private key in the pk_file. in_buffer must be a null-terminated string
 //! Result is placed in *out_buffer on the heap and caller is responsible for freeing.
 //!
@@ -278,18 +595,17 @@ int euca_init_cert(void)
 //!
 int decrypt_string(char *in_buffer, char *pk_file, char **out_buffer)
 {
-    FILE *PKFP = NULL;
-    RSA *pr = NULL;
-    char *dec64 = NULL;
-    int rc = -1;
     int ret = -1;
     int in_buffer_str_size = -1;
+    char *dec64 = NULL;
+    int out_size = 0;
+    FILE *PKFP = NULL;
+    RSA *pr = NULL;
 
     // Make sure we have valid parameters
     if ((in_buffer == NULL) || (pk_file == NULL) || (*pk_file == '\0') || (out_buffer == NULL)) {
         LOGERROR("Cannot decrypt buffer: invalid parameters\n");
-        ret = EUCA_ERROR;
-        goto cleanup;
+        return (EUCA_ERROR);
     }
 
     in_buffer_str_size = (int)strlen(in_buffer);    //! the length of the string, not including the null-terminator
@@ -313,8 +629,7 @@ int decrypt_string(char *in_buffer, char *pk_file, char **out_buffer)
     PKFP = NULL;
 
     //Base64 decode the string, null terminator deducted from buffer size
-    dec64 = base64_dec((unsigned char *)in_buffer, in_buffer_str_size);
-    if (dec64 == NULL) {
+    if ((dec64 = base64_dec((unsigned char *)in_buffer, in_buffer_str_size)) == NULL) {
         LOGERROR("Base64 decrypt failed\n");
         ret = EUCA_ERROR;
         goto cleanup;
@@ -328,9 +643,7 @@ int decrypt_string(char *in_buffer, char *pk_file, char **out_buffer)
         bzero(*out_buffer, in_buffer_str_size + 1);
     }
 
-    int out_size = RSA_private_decrypt(RSA_size(pr), ((unsigned char *)dec64), ((unsigned char *)*out_buffer), pr, RSA_PKCS1_PADDING);
-
-    if (out_size == -1) {
+    if ((out_size = RSA_private_decrypt(RSA_size(pr), ((unsigned char *)dec64), ((unsigned char *)*out_buffer), pr, RSA_PKCS1_PADDING)) == -1) {
         LOGERROR("private decrypt failed\n");
         ret = EUCA_ERROR;
         goto cleanup;
@@ -339,11 +652,8 @@ int decrypt_string(char *in_buffer, char *pk_file, char **out_buffer)
     ret = EUCA_OK;
 
 cleanup:
-    if (dec64 != NULL) {
-        EUCA_FREE(dec64);
-    }
-
-    if (ret == EUCA_ERROR && *out_buffer != NULL) {
+    EUCA_FREE(dec64);
+    if (ret == EUCA_ERROR) {
         EUCA_FREE(*out_buffer);
     }
 
@@ -366,16 +676,17 @@ cleanup:
 //!
 int encrypt_string(char *in_buffer, char *cert_file, char **out_buffer)
 {
-    char *enc64 = NULL;
     int rc = -1;
-    RSA *pr = NULL;
-    BIO *cert_bio = NULL;
-    BIO *out_bio = NULL;
-    X509 *cert = NULL;
     int key_bits = -1;
     int ret = -1;
     int in_buffer_str_size = -1;
     int encrypt_size = -1;
+    char *enc64 = NULL;
+    RSA *pr = NULL;
+    BIO *cert_bio = NULL;
+    BIO *out_bio = NULL;
+    X509 *cert = NULL;
+    EVP_PKEY *pubkey = NULL;
 
     // Make sure we have valid parameters
     if ((in_buffer == NULL) || (cert_file == NULL) || (*cert_file == '\0') || (out_buffer == NULL)) {
@@ -405,8 +716,7 @@ int encrypt_string(char *in_buffer, char *cert_file, char **out_buffer)
         goto cleanup;
     }
     //Get the public key and populate the RSA struct
-    EVP_PKEY *pubkey = X509_get_pubkey(cert);
-    if (pubkey == NULL) {
+    if ((pubkey = X509_get_pubkey(cert)) == NULL) {
         LOGERROR("ERROR getting pub key\n");
         ret = EUCA_ERROR;
         goto cleanup;
@@ -431,15 +741,13 @@ int encrypt_string(char *in_buffer, char *cert_file, char **out_buffer)
         }
     }
 
-    pr = EVP_PKEY_get1_RSA(pubkey);
-    if (pr == NULL) {
+    if ((pr = EVP_PKEY_get1_RSA(pubkey)) == NULL) {
         LOGERROR("Could not get public RSA key for encrypting\n");
         ret = EUCA_ERROR;
         goto cleanup;
     }
 
-    encrypt_size = RSA_size(pr);
-    if (encrypt_size <= 0) {
+    if ((encrypt_size = RSA_size(pr)) <= 0) {
         LOGERROR("Failed to read expected encryption size from RSA based on key\n");
         ret = EUCA_ERROR;
         goto cleanup;
@@ -475,9 +783,7 @@ cleanup:
         BIO_free(cert_bio);
     }
 
-    if (enc64 != NULL) {
-        EUCA_FREE(enc64);
-    }
+    EUCA_FREE(enc64);
 
     if (cert != NULL) {
         X509_free(cert);
@@ -488,7 +794,6 @@ cleanup:
     }
 
     return ret;
-
 }
 
 //! Encrypts and base64 encodes the buffer using the public key in the cloud certificate.
@@ -655,6 +960,47 @@ char *base64_enc(u8 * sIn, int size)
         }
     }
     return (sEncVal);
+}
+
+//!
+//!
+//!
+//! @param[in] sIn
+//! @param[in] size
+//! @param[in] decoded_length
+//!
+//! @return
+//!
+char *base64_dec2(u8 * sIn, int size, int *decoded_length)
+{
+    BIO *pBio64 = NULL;
+    BIO *pBioMem = NULL;
+    char *sBuffer = NULL;
+
+    if ((sIn != NULL) && (size > 0)) {
+        if ((pBio64 = BIO_new(BIO_f_base64())) == NULL) {
+            LOGERROR("BIO_new(BIO_f_base64()) failed\n");
+        } else {
+            BIO_set_flags(pBio64, BIO_FLAGS_BASE64_NO_NL);  /* no long-line wrapping */
+
+            if ((pBioMem = BIO_new_mem_buf(sIn, size)) == NULL) {
+                LOGERROR("BIO_new_mem_buf() failed\n");
+            } else if ((sBuffer = EUCA_ZALLOC(size, sizeof(char))) == NULL) {
+                LOGERROR("Memory allocation failure.\n");
+            } else {
+                pBioMem = BIO_push(pBio64, pBioMem);
+
+                if ((*decoded_length = BIO_read(pBioMem, sBuffer, size)) <= 0) {
+                    LOGERROR("BIO_read() read failed\n");
+                    EUCA_FREE(sBuffer);
+                }
+            }
+
+            BIO_free_all(pBio64);
+        }
+    }
+
+    return (sBuffer);
 }
 
 //!
@@ -1513,7 +1859,7 @@ char *eucav2_sign_request(const char *verb, const char *url, const struct curl_s
 
                     // create full auth header string
                     if ((auth_header = (char *)EUCA_ZALLOC((BUFSIZE + 1), sizeof(char))) == NULL) {
-                        LOGERROR("Cannot sign walrus request, no memory for auth header string\n");
+                        LOGERROR("Cannot sign object storage request, no memory for auth header string\n");
                     } else {
                         snprintf(auth_header, BUFSIZE, "Authorization: EUCA2-RSA-SHA256 %s %s %s", cert_fingerprint, signed_headers, sig_str);
                     }
@@ -1657,8 +2003,9 @@ static void init_url_regex(void)
 
         case REG_BADBR:
             LOGERROR
-                ("init_url_regex: There was an invalid ���\\{...\\}��� construct in the regular expression. A valid ���\\{...\\}��� construct must contain either a"
-                 " single number, or two numbers in increasing order separated by a comma.\n");
+                ("There was an invalid ���������������������������\\{...\\}��������������������������� construct "
+                 "in the regular expression. A valid ���������������������������\\{...\\}��������������������������� construct "
+                 "must contain either a single number, or two numbers in increasing order separated by a comma.\n");
             break;
 
         case REG_BADPAT:
@@ -1667,48 +2014,55 @@ static void init_url_regex(void)
 
         case REG_BADRPT:
             LOGERROR
-                ("init_url_regex: A repetition operator such as ���?��� or ���*��� appeared in a bad position (with no preceding subexpression to act on).\n");
+                ("A repetition operator such as ���������������������������?��������������������������� or "
+                 "���������������������������*��������������������������� appeared in a bad position (with no preceding "
+                 "subexpression to act on).\n");
             break;
 
         case REG_ECOLLATE:
-            LOGERROR("init_url_regex: The regular expression referred to an invalid collating element (one not defined in the current locale for string collation).\n");
+            LOGERROR("The regular expression referred to an invalid collating element (one not defined in the current locale for string collation).\n");
             break;
 
         case REG_ECTYPE:
-            LOGERROR("init_url_regex: The regular expression referred to an invalid character class name.\n");
+            LOGERROR("The regular expression referred to an invalid character class name.\n");
             break;
 
         case REG_EESCAPE:
-            LOGERROR("init_url_regex: The regular expression ended with ���\\���.\n");
+            LOGERROR
+                ("The regular expression ended with ���������������������������\\���������������������������.\n");
             break;
 
         case REG_ESUBREG:
-            LOGERROR("init_url_regex: There was an invalid number in the ���\\digit��� construct.\n");
+            LOGERROR
+                ("There was an invalid number in the ���������������������������\\digit��������������������������� construct.\n");
             break;
 
         case REG_EBRACK:
-            LOGERROR("init_url_regex: There were unbalanced square brackets in the regular expression.\n");
+            LOGERROR("There were unbalanced square brackets in the regular expression.\n");
             break;
 
         case REG_EPAREN:
-            LOGERROR
-                ("init_url_regex: An extended regular expression had unbalanced parentheses, or a basic regular expression had unbalanced ���\\(��� and ���\\)���.\n");
+            LOGERROR("An extended regular expression had unbalanced parentheses, or a basic regular expression had unbalanced "
+                     "���������������������������\\(��������������������������� and ���������������������������\\)"
+                     "���������������������������.\n");
             break;
 
         case REG_EBRACE:
-            LOGERROR("init_url_regex: The regular expression had unbalanced ���\\{��� and ���\\}���.\n");
+            LOGERROR
+                ("The regular expression had unbalanced ���������������������������\\{��������������������������� and "
+                 "���������������������������\\}���������������������������.\n");
             break;
 
         case REG_ERANGE:
-            LOGERROR("init_url_regex: One of the endpoints in a range expression was invalid.\n");
+            LOGERROR("One of the endpoints in a range expression was invalid.\n");
             break;
 
         case REG_ESPACE:
-            LOGERROR("init_url_regex: regcomp ran out of memory.\n");
+            LOGERROR("regcomp ran out of memory.\n");
             break;
 
         default:
-            LOGERROR("init_url_regex: Regex compile failed. Code = %d\n", comp_result);
+            LOGERROR("Regex compile failed. Code = %d\n", comp_result);
             break;
         }
 
@@ -1819,7 +2173,7 @@ void print_key_value_pair_array(const struct key_value_pair_array *kv_array)
 //!
 int main(int argc, char **argv)
 {
-#define TEST_COUNT     0
+#define TEST_COUNT          0
 #define REGEX_COUNT         5
 #define URL_COUNT          20
 
@@ -1837,41 +2191,41 @@ int main(int argc, char **argv)
     struct key_value_pair_array *hdr_array = NULL;
 
     static char *regex_test[REGEX_COUNT] = {
-        "http://testserver.com:8773/services/Walrus/bucket/object?attribute=value",
-        "walrus://192.168.51.1:8773/services/Walrus/bucket/object",
-        "http://192.168.51.1:8773/services/Walrus/bucket/object123%2B?acl",
-        "https://192.168.51.1:8773/services/Walrus/bucket/object?aclname=value&test123",
+        "http://testserver.com:8773/services/objectstorage/bucket/object?attribute=value",
+        "objectstorage://192.168.51.1:8773/services/objectstorage/bucket/object",
+        "http://192.168.51.1:8773/services/objectstorage/bucket/object123%2B?acl",
+        "https://192.168.51.1:8773/services/objectstorage/bucket/object?aclname=value&test123",
         "hargarble:?\?///blah123&"
     };
 
     static char *test_strings[4] = {
         "host: 129.168.1.1",
-        "host : walrus.eucalyptus",
-        " host :  walrus.eucalyptus:8773    ",
+        "host : objectstorage.eucalyptus",
+        " host :  objectstorage.eucalyptus:8773    ",
         " hos t: 129.1.1"
     };
 
     char *test_urls[URL_COUNT] = {
-        "http://myserver.com:8773/services/Walrus/bucket/cento2123_testkvm.img.manifest.xml?versionId=123&acl",
-        "https://myserver.com:8773/services/Walrus/bucket/cento2123_testkvm.img._manifest_.xml?versionId=123&acl",
-        "http://myserver.com:8773/services/Walrus/bucket/cento2123_test%20kvm.img.manifest.xml?versionId=123&acl",
-        "https://myserver.com:8773/services/Walrus/bucket/xen_images/image123_test.manifest.xml",
-        "http://myserver.com:8773/services/Walrus/bucket/centos/images/image1_testkvm.img.manifest.xml",
-        "https://myserver.com:8773/services/Walrus/bucket/_testkvm.img.manifest.xml",
-        "https://myserver.com:8773/services/Walrus/bucket/_---$123.img.manifest.xml",
-        "http://myserver.com:8773/services/Walrus/bucket_temp/cento2123_testkvm.img.manifest.xml",
-        "https://myserver.com/services/Walrus/bucket/cento2123_testkvm.img.manifest.xml",
-        "http://myserver.com:8773/services/Walrus/bucket/cento2123_testkvm.img.manifest.xml",
-        "myserver.com:8773/services/Walrus/bucket/object?versionId=123&acl",
-        "myserver.com/services/Walrus/bucket/_A_?zoom&versionId=123&acl",
-        "https://myserver.com/services/Walrus/bucket/object",
-        "https://myserver.com/services/Walrus/bucket/",
+        "http://myserver.com:8773/services/objectstorage/bucket/cento2123_testkvm.img.manifest.xml?versionId=123&acl",
+        "https://myserver.com:8773/services/objectstorage/bucket/cento2123_testkvm.img._manifest_.xml?versionId=123&acl",
+        "http://myserver.com:8773/services/objectstorage/bucket/cento2123_test%20kvm.img.manifest.xml?versionId=123&acl",
+        "https://myserver.com:8773/services/objectstorage/bucket/xen_images/image123_test.manifest.xml",
+        "http://myserver.com:8773/services/objectstorage/bucket/centos/images/image1_testkvm.img.manifest.xml",
+        "https://myserver.com:8773/services/objectstorage/bucket/_testkvm.img.manifest.xml",
+        "https://myserver.com:8773/services/objectstorage/bucket/_---$123.img.manifest.xml",
+        "http://myserver.com:8773/services/objectstorage/bucket_temp/cento2123_testkvm.img.manifest.xml",
+        "https://myserver.com/services/objectstorage/bucket/cento2123_testkvm.img.manifest.xml",
+        "http://myserver.com:8773/services/objectstorage/bucket/cento2123_testkvm.img.manifest.xml",
+        "myserver.com:8773/services/objectstorage/bucket/object?versionId=123&acl",
+        "myserver.com/services/objectstorage/bucket/_A_?zoom&versionId=123&acl",
+        "https://myserver.com/services/objectstorage/bucket/object",
+        "https://myserver.com/services/objectstorage/bucket/",
         "http://myserver.com/",
-        "http://myserver.com:8773/services/Walrus/bucket/object?versionId=123&zoom&acl",
-        "myserver.com:8773/services/Walrus/bucket/object",
-        "/services/Walrus/bucket",
-        "wargarblr?/services/Walrus/bucket&?/object",
-        "/services/Walrus/bucket/object?versionId=123&acl"
+        "http://myserver.com:8773/services/objectstorage/bucket/object?versionId=123&zoom&acl",
+        "myserver.com:8773/services/objectstorage/bucket/object",
+        "/services/objectstorage/bucket",
+        "wargarblr?/services/objectstorage/bucket&?/object",
+        "/services/objectstorage/bucket/object?versionId=123&acl"
     };
 
     if (argc > 1) {

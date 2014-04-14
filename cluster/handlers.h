@@ -91,10 +91,6 @@
  |                                                                            |
 \*----------------------------------------------------------------------------*/
 
-#ifndef MAX_PATH
-#define MAX_PATH                                 4096
-#endif /* ! MAX_PATH */
-
 #define OP_TIMEOUT                               60
 #define OP_TIMEOUT_PERNODE                       20
 #define OP_TIMEOUT_MIN                            5
@@ -128,6 +124,7 @@ enum {
     REFRESHLOCK,
     BUNDLECACHE,
     SENSORCACHE,
+    GLOBALNETWORKINFO,
     NCCALL0,
     NCCALL1,
     NCCALL2,
@@ -311,25 +308,25 @@ typedef struct ccInstanceCache_t {
 } ccInstanceCache;
 
 typedef struct ccConfig_t {
-    char eucahome[MAX_PATH];
-    char log_file_path[MAX_PATH];
+    char eucahome[EUCA_MAX_PATH];
+    char log_file_path[EUCA_MAX_PATH];
     long log_max_size_bytes;
     int log_roll_number;
     int log_level;
     char log_prefix[64];
     char log_facility[32];
-    char proxyPath[MAX_PATH];
+    char proxyPath[EUCA_MAX_PATH];
     char proxyIp[32];
     int use_proxy;
     int proxy_max_cache_size;
-    char configFiles[2][MAX_PATH];
+    char configFiles[2][EUCA_MAX_PATH];
     int use_wssec;
     int use_tunnels;
-    char policyFile[MAX_PATH];
+    char policyFile[EUCA_MAX_PATH];
     int initialized;
     int kick_dhcp;
     int schedPolicy;
-    char schedPath[MAX_PATH];
+    char schedPath[EUCA_MAX_PATH];
     int schedState;
     int idleThresh;
     int wakeThresh;
@@ -344,6 +341,7 @@ typedef struct ccConfig_t {
     int kick_network;
     int kick_enabled;
     int kick_monitor_running;
+    int kick_broadcast_network_info;
     uint32_t cloudIp;
     serviceStatusType ccStatus;
     serviceInfoType services[16];
@@ -370,7 +368,7 @@ extern char *SCHEDPOLICIES[SCHEDLAST];
 \*----------------------------------------------------------------------------*/
 
 void doInitCC(void);
-int doBundleInstance(ncMetadata * pMeta, char *instanceId, char *bucketName, char *filePrefix, char *walrusURL, char *userPublicKey, char *S3Policy, char *S3PolicySig);
+int doBundleInstance(ncMetadata * pMeta, char *instanceId, char *bucketName, char *filePrefix, char *objectStorageURL, char *userPublicKey, char *S3Policy, char *S3PolicySig);
 int doBundleRestartInstance(ncMetadata * pMeta, char *instanceId);
 int doCancelBundleTask(ncMetadata * pMeta, char *instanceId);
 int ncClientCall(ncMetadata * pMeta, int timeout, int ncLock, char *ncURL, char *ncOp, ...);
@@ -380,17 +378,19 @@ int doDetachVolume(ncMetadata * pMeta, char *volumeId, char *instanceId, char *r
 int doConfigureNetwork(ncMetadata * pMeta, char *accountId, char *type, int namedLen, char **sourceNames, char **userNames, int netLen,
                        char **sourceNets, char *destName, char *destUserName, char *protocol, int minPort, int maxPort);
 int doFlushNetwork(ncMetadata * pMeta, char *accountId, char *destName);
+int doBroadcastNetworkInfo(ncMetadata * pMeta, char *networkInfo);
 int doAssignAddress(ncMetadata * pMeta, char *uuid, char *src, char *dst);
 int doDescribePublicAddresses(ncMetadata * pMeta, publicip ** outAddresses, int *outAddressesLen);
 int doUnassignAddress(ncMetadata * pMeta, char *src, char *dst);
 int doStopNetwork(ncMetadata * pMeta, char *accountId, char *netName, int vlan);
-int doDescribeNetworks(ncMetadata * pMeta, char *nameserver, char **ccs, int ccsLen, vnetConfig * outvnetConfig);
-int doStartNetwork(ncMetadata * pMeta, char *accountId, char *uuid, char *netName, int vlan, char *nameserver, char **ccs, int ccsLen);
+int doDescribeNetworks(ncMetadata * pMeta, char *vmsubdomain, char *nameservers, char **ccs, int ccsLen, vnetConfig * outvnetConfig);
+int doStartNetwork(ncMetadata * pMeta, char *accountId, char *uuid, char *netName, int vlan, char *vmsubdomain, char *nameservers, char **ccs, int ccsLen);
 int doDescribeResources(ncMetadata * pMeta, virtualMachine ** ccvms, int vmLen, int **outTypesMax, int **outTypesAvail, int *outTypesLen, ccResource ** outNodes, int *outNodesLen);
 int changeState(ccResource * in, int newstate);
 int refresh_resources(ncMetadata * pMeta, int timeout, int dolock);
 int refresh_instances(ncMetadata * pMeta, int timeout, int dolock);
 int refresh_sensors(ncMetadata * pMeta, int timeout, int dolock);
+int broadcast_network_info(ncMetadata * pMeta, int timeout, int dolock);
 int doDescribeInstances(ncMetadata * pMeta, char **instIds, int instIdsLen, ccInstance ** outInsts, int *outInstsLen);
 int powerUp(ccResource * res);
 int powerDown(ncMetadata * pMeta, ccResource * node);
@@ -402,9 +402,10 @@ int schedule_instance_roundrobin(virtualMachine * vm, int *outresid);
 int schedule_instance_explicit(virtualMachine * vm, char *targetNode, int *outresid, boolean is_migration);
 int schedule_instance_user(virtualMachine * vm, char *amiId, char *kernelId, char *ramdiskId, char *instId, char *userData, char *platform, int *outresid);
 int schedule_instance_greedy(virtualMachine * vm, int *outresid);
-int doRunInstances(ncMetadata * pMeta, char *amiId, char *kernelId, char *ramdiskId, char *amiURL, char *kernelURL, char *ramdiskURL, char **instIds, int instIdsLen,
-                   char **netNames, int netNamesLen, char **macAddrs, int macAddrsLen, int *networkIndexList, int networkIndexListLen, char **uuids, int uuidsLen, int minCount,
-                   int maxCount, char *accountId, char *ownerId, char *reservationId, virtualMachine * ccvm, char *keyName, int vlan, char *userData, char *launchIndex,
+int doRunInstances(ncMetadata * pMeta, char *amiId, char *kernelId, char *ramdiskId, char *amiURL, char *kernelURL, char *ramdiskURL, char **instIds,
+                   int instIdsLen, char **netNames, int netNamesLen, char **macAddrs, int macAddrsLen, int *networkIndexList, int networkIndexListLen,
+                   char **uuids, int uuidsLen, char **privateIps, int privateIpsLen, int minCount, int maxCount, char *accountId, char *ownerId,
+                   char *reservationId, virtualMachine * ccvm, char *keyName, int vlan, char *userData, char *credential, char *launchIndex,
                    char *platform, int expiryTime, char *targetNode, ccInstance ** outInsts, int *outInstsLen);
 int doGetConsoleOutput(ncMetadata * pMeta, char *instanceId, char **consoleOutput);
 int doRebootInstances(ncMetadata * pMeta, char **instIds, int instIdsLen);

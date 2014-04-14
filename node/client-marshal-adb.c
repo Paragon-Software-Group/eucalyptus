@@ -306,7 +306,7 @@ int ncStubDestroy(ncStub * pStub)
 //!
 int ncRunInstanceStub(ncStub * pStub, ncMetadata * pMeta, char *uuid, char *instanceId, char *reservationId, virtualMachine * params, char *imageId,
                       char *imageURL, char *kernelId, char *kernelURL, char *ramdiskId, char *ramdiskURL, char *ownerId, char *accountId,
-                      char *keyName, netConfig * netparams, char *userData, char *launchIndex, char *platform, int expiryTime, char **groupNames,
+                      char *keyName, netConfig * netparams, char *userData, char *credential, char *launchIndex, char *platform, int expiryTime, char **groupNames,
                       int groupNamesSize, ncInstance ** outInstPtr)
 {
     int i = 0;
@@ -349,6 +349,7 @@ int ncRunInstanceStub(ncStub * pStub, ncMetadata * pMeta, char *uuid, char *inst
     adb_netConfigType_set_networkIndex(netConfig, env, netparams->networkIndex);
     adb_ncRunInstanceType_set_netParams(request, env, netConfig);
     adb_ncRunInstanceType_set_userData(request, env, userData);
+    adb_ncRunInstanceType_set_credential(request, env, credential);
     adb_ncRunInstanceType_set_launchIndex(request, env, launchIndex);
     adb_ncRunInstanceType_set_platform(request, env, platform);
 
@@ -684,6 +685,56 @@ int ncDescribeResourceStub(ncStub * pStub, ncMetadata * pMeta, char *resourceTyp
 }
 
 //!
+//! Marshals the client network broadcast info request.
+//!
+//! @param[in] pStub a pointer to the node controller (NC) stub structure
+//! @param[in] pMeta a pointer to the node controller (NC) metadata structure
+//! @param[in] networkInfo is a string 
+//!
+//! @return EUCA_OK on success or EUCA_ERROR on failure.
+//!
+int ncBroadcastNetworkInfoStub(ncStub * pStub, ncMetadata * pMeta, char *networkInfo)
+{
+    int status = 0;
+    axutil_env_t *env = NULL;
+    axis2_stub_t *stub = NULL;
+    adb_ncBroadcastNetworkInfo_t *input = NULL;
+    adb_ncBroadcastNetworkInfoType_t *request = NULL;
+    adb_ncBroadcastNetworkInfoResponse_t *output = NULL;
+    adb_ncBroadcastNetworkInfoResponseType_t *response = NULL;
+
+    env = pStub->env;
+    stub = pStub->stub;
+    input = adb_ncBroadcastNetworkInfo_create(env);
+    request = adb_ncBroadcastNetworkInfoType_create(env);
+
+    // set standard input fields
+    adb_ncBroadcastNetworkInfoType_set_nodeName(request, env, pStub->node_name);
+    if (pMeta) {
+        EUCA_FREE(pMeta->correlationId);
+        EUCA_MESSAGE_MARSHAL(ncBroadcastNetworkInfoType, request, pMeta);
+    }
+    // set op-specific input fields
+    adb_ncBroadcastNetworkInfoType_set_networkInfo(request, env, networkInfo);
+
+    adb_ncBroadcastNetworkInfo_set_ncBroadcastNetworkInfo(input, env, request);
+
+    // do it
+    if ((output = axis2_stub_op_EucalyptusNC_ncBroadcastNetworkInfo(stub, env, input)) == NULL) {
+        LOGERROR(NULL_ERROR_MSG);
+        status = -1;
+    } else {
+        response = adb_ncBroadcastNetworkInfoResponse_get_ncBroadcastNetworkInfoResponse(output, env);
+        if (adb_ncBroadcastNetworkInfoResponseType_get_return(response, env) == AXIS2_FALSE) {
+            LOGERROR("returned an error\n");
+            status = 1;
+        }
+    }
+
+    return (status);
+}
+
+//!
 //! Marshals the client assign address request.
 //!
 //! @param[in] pStub a pointer to the node controller (NC) stub structure
@@ -972,14 +1023,14 @@ int ncDetachVolumeStub(ncStub * pStub, ncMetadata * pMeta, char *instanceId, cha
 //! @param[in] instanceId the instance identifier string (i-XXXXXXXX)
 //! @param[in] bucketName the bucket name string to which the bundle will be saved
 //! @param[in] filePrefix the prefix name string of the bundle
-//! @param[in] walrusURL the walrus URL address string
+//! @param[in] objectStorageURL the object storage URL address string
 //! @param[in] userPublicKey the public key string
 //! @param[in] S3Policy the S3 engine policy
 //! @param[in] S3PolicySig the S3 engine policy signature
 //!
 //! @return Always return EUCA_OK
 //!
-int ncBundleInstanceStub(ncStub * pStub, ncMetadata * pMeta, char *instanceId, char *bucketName, char *filePrefix, char *walrusURL,
+int ncBundleInstanceStub(ncStub * pStub, ncMetadata * pMeta, char *instanceId, char *bucketName, char *filePrefix, char *objectStorageURL,
                          char *userPublicKey, char *S3Policy, char *S3PolicySig)
 {
     int status = 0;
@@ -1005,7 +1056,7 @@ int ncBundleInstanceStub(ncStub * pStub, ncMetadata * pMeta, char *instanceId, c
     adb_ncBundleInstanceType_set_instanceId(request, env, instanceId);
     adb_ncBundleInstanceType_set_bucketName(request, env, bucketName);
     adb_ncBundleInstanceType_set_filePrefix(request, env, filePrefix);
-    adb_ncBundleInstanceType_set_walrusURL(request, env, walrusURL);
+    adb_ncBundleInstanceType_set_objectStorageURL(request, env, objectStorageURL);
     adb_ncBundleInstanceType_set_userPublicKey(request, env, userPublicKey);
     adb_ncBundleInstanceType_set_S3Policy(request, env, S3Policy);
     adb_ncBundleInstanceType_set_S3PolicySig(request, env, S3PolicySig);

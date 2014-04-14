@@ -190,6 +190,7 @@ static char stage_files_dir[EUCA_MAX_PATH] = "";
 static int initialized = 0;
 static sem *loop_sem = NULL;           //!< semaphore held while attaching/detaching loopback devices
 static unsigned char grub_version = 0;
+static char euca_home[EUCA_MAX_PATH] = "";
 
 /*----------------------------------------------------------------------------*\
  |                                                                            |
@@ -240,6 +241,35 @@ static int try_stage_dir(const char *dir)
         return (EUCA_OK);
     }
     return (EUCA_INVALID_ERROR);
+}
+
+int imaging_init(const char *euca_home_path)
+{
+    assert(euca_home_path);
+    euca_strncpy(euca_home, euca_home_path, sizeof(euca_home));
+    return EUCA_OK;
+}
+
+int imaging_image_by_manifest_url(const char *instanceId, const char *url, const char *dest_path, long long size_bytes)
+{
+    LOGDEBUG("[%s] getting download manifest from %s\n", instanceId, url);
+
+    char cmd[1024];
+    snprintf(cmd, sizeof(cmd),
+             "%s/usr/libexec/eucalyptus/euca-run-workflow down-bundle/write-raw"
+             " --image-manifest-url '%s'"
+             " --output-path '%s'"
+             " --cloud-cert-path '%s/var/lib/eucalyptus/keys/cloud-cert.pem'"
+             " --decryption-key-path '%s/var/lib/eucalyptus/keys/node-pk.pem' >> /tmp/euca_nc_unbundle.log 2>&1", euca_home, url, dest_path, euca_home, euca_home);
+    LOGDEBUG("%s\n", cmd);
+    if (system(cmd) == 0) {
+        LOGDEBUG("[%s] downloaded and unbundled %s\n", instanceId, url);
+        return EUCA_OK;
+    } else {
+        LOGERROR("[%s] failed on download and unbundle with command %s\n", instanceId, cmd);
+        return EUCA_ERROR;
+    }
+    return EUCA_ERROR;
 }
 
 //!
@@ -351,7 +381,7 @@ int diskutil_ddzero(const char *path, const long long sectors, boolean zero_fill
             seek = 0;
         }
 
-        char of_str[MAX_PATH];
+        char of_str[EUCA_MAX_PATH] = "";
         snprintf(of_str, sizeof(of_str), "of=%s", path);
         char seek_str[64];
         snprintf(seek_str, sizeof(seek_str), "seek=%lld", seek);
@@ -395,9 +425,9 @@ int diskutil_dd(const char *in, const char *out, const int bs, const long long c
         LOGINFO("copying data from '%s'\n", in);
         LOGINFO("               to '%s' (blocks=%lld)\n", out, count);
 
-        char if_str[MAX_PATH];
+        char if_str[EUCA_MAX_PATH] = "";
         snprintf(if_str, sizeof(if_str), "if=%s", in);
-        char of_str[MAX_PATH];
+        char of_str[EUCA_MAX_PATH] = "";
         snprintf(of_str, sizeof(of_str), "of=%s", out);
         char bs_str[64];
         snprintf(bs_str, sizeof(bs_str), "bs=%d", bs);
@@ -445,9 +475,9 @@ int diskutil_dd2(const char *in, const char *out, const int bs, const long long 
         LOGINFO("               to '%s'\n", out);
         LOGINFO("               of %lld blocks (bs=%d), seeking %lld, skipping %lld\n", count, bs, seek, skip);
 
-        char if_str[MAX_PATH];
+        char if_str[EUCA_MAX_PATH] = "";
         snprintf(if_str, sizeof(if_str), "if=%s", in);
-        char of_str[MAX_PATH];
+        char of_str[EUCA_MAX_PATH] = "";
         snprintf(of_str, sizeof(of_str), "of=%s", out);
         char bs_str[64];
         snprintf(bs_str, sizeof(bs_str), "bs=%d", bs);
@@ -1642,6 +1672,7 @@ static char *execlp_output(boolean log_error, ...)
     if (output) {
         output[0] = '\0';              // return an empty string if there is no output
     }
+
     while ((output != NULL) && (bytesread = read(filedes[0], output + nextchar, outsize - nextchar - 1)) > 0) {
         nextchar += bytesread;
         output[nextchar] = '\0';
@@ -1676,8 +1707,9 @@ static char *execlp_output(boolean log_error, ...)
         }
     }
 
-    if (rc) {                          // there were problems above
-        if (strstr(cmd, "losetup") && strstr(output, ": No such device or address")) {
+    if (rc) {
+        // there were problems above
+        if ((output != NULL) && strstr(cmd, "losetup") && strstr(output, ": No such device or address")) {
             rc = 0;
         } else {
             if (log_error) {

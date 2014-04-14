@@ -168,32 +168,32 @@
 int ipt_handler_init(ipt_handler * ipth, char *cmdprefix)
 {
     int fd;
-    char cmd[MAX_PATH];
+    char cmd[EUCA_MAX_PATH];
 
     if (!ipth) {
         return (1);
     }
     bzero(ipth, sizeof(ipt_handler));
 
-    snprintf(ipth->ipt_file, MAX_PATH, "/tmp/ipt_file-XXXXXX");
+    snprintf(ipth->ipt_file, EUCA_MAX_PATH, "/tmp/ipt_file-XXXXXX");
     fd = safe_mkstemp(ipth->ipt_file);
     if (fd < 0) {
-        LOGERROR("cannot open ipt_file '%s'\n", ipth->ipt_file);
+        LOGERROR("cannot create tmpfile '%s': check permissions\n", ipth->ipt_file);
         return (1);
     }
     chmod(ipth->ipt_file, 0600);
     close(fd);
 
     if (cmdprefix) {
-        snprintf(ipth->cmdprefix, MAX_PATH, "%s", cmdprefix);
+        snprintf(ipth->cmdprefix, EUCA_MAX_PATH, "%s", cmdprefix);
     } else {
         ipth->cmdprefix[0] = '\0';
     }
 
     // test required shell-outs
-    snprintf(cmd, MAX_PATH, "%s iptables-save >/dev/null 2>&1", ipth->cmdprefix);
+    snprintf(cmd, EUCA_MAX_PATH, "%s iptables-save >/dev/null 2>&1", ipth->cmdprefix);
     if (system(cmd)) {
-        LOGERROR("could not execute required shell out (%s)\n", cmd);
+        LOGERROR("could not execute required shell out '%s': check command/permissions\n", cmd);
         return (1);
     }
 
@@ -218,14 +218,14 @@ int ipt_handler_init(ipt_handler * ipth, char *cmdprefix)
 //!
 int ipt_system_save(ipt_handler * ipth)
 {
-    int rc, fd;
-    char cmd[MAX_PATH];
+    int rc = 0;
+    char cmd[EUCA_MAX_PATH] = "";
 
-    snprintf(cmd, MAX_PATH, "%s iptables-save -c > %s", ipth->cmdprefix, ipth->ipt_file);
+    snprintf(cmd, EUCA_MAX_PATH, "%s iptables-save -c > %s", ipth->cmdprefix, ipth->ipt_file);
     rc = system(cmd);
     rc = rc >> 8;
     if (rc) {
-        LOGERROR("failed to execute iptables-save (%s)\n", cmd);
+        LOGERROR("iptables-save failed '%s'\n", cmd);
     }
     return (rc);
 }
@@ -248,14 +248,16 @@ int ipt_system_save(ipt_handler * ipth)
 int ipt_system_restore(ipt_handler * ipth)
 {
     int rc;
-    char cmd[MAX_PATH];
+    char cmd[EUCA_MAX_PATH];
 
-    snprintf(cmd, MAX_PATH, "%s iptables-restore -c < %s", ipth->cmdprefix, ipth->ipt_file);
+    snprintf(cmd, EUCA_MAX_PATH, "%s iptables-restore -c < %s", ipth->cmdprefix, ipth->ipt_file);
     rc = system(cmd);
     rc = rc >> 8;
     if (rc) {
-        LOGERROR("failed to execute iptables-restore (%s)\n", cmd);
+        copy_file(ipth->ipt_file, "/tmp/euca_ipt_file_failed");
+        LOGERROR("iptables-restore failed '%s': copying failed input file to '/tmp/euca_ipt_file_failed' for manual retry.\n", cmd);
     }
+    unlink(ipth->ipt_file);
     return (rc);
 }
 
@@ -286,7 +288,7 @@ int ipt_handler_deploy(ipt_handler * ipth)
 
     FH = fopen(ipth->ipt_file, "w");
     if (!FH) {
-        LOGERROR("could not open file for write(%s)\n", ipth->ipt_file);
+        LOGERROR("could not open file for write '%s': check permissions\n", ipth->ipt_file);
         return (1);
     }
     for (i = 0; i < ipth->max_tables; i++) {
@@ -362,10 +364,17 @@ int ipt_ruleordercmp(const void *p1, const void *p2)
 //!
 int ipt_handler_repopulate(ipt_handler * ipth)
 {
-    int i, rc;
+    int rc = 0;
     FILE *FH = NULL;
-    char buf[1024], tmpbuf[1024], *strptr = NULL, newrule[1024];
-    char tablename[64], chainname[64], policyname[64], counters[64], counterstr[256];
+    char buf[1024] = "";
+    char tmpbuf[1024] = "";
+    char *strptr = NULL;
+    char newrule[1024] = "";
+    char tablename[64] = "";
+    char chainname[64] = "";
+    char policyname[64] = "";
+    char counters[64] = "";
+    char counterstr[256] = "";
     //  long long int countersa, countersb;
 
     if (!ipth || !ipth->init) {
@@ -379,13 +388,13 @@ int ipt_handler_repopulate(ipt_handler * ipth)
 
     rc = ipt_system_save(ipth);
     if (rc) {
-        LOGERROR("could not save current IPT rules to file, skipping re-populate\n");
+        LOGERROR("could not save current IPT rules to file, exiting re-populate\n");
         return (1);
     }
 
     FH = fopen(ipth->ipt_file, "r");
     if (!FH) {
-        LOGERROR("could not open file for read(%s)\n", ipth->ipt_file);
+        LOGERROR("could not open file for read '%s': check permissions\n", ipth->ipt_file);
         return (1);
     }
 
@@ -636,7 +645,7 @@ int ipt_chain_insert_rule(ipt_handler * ipth, char *tablename, char *chainname, 
     } else if (order == IPT_NO_ORDER) {
         rule->order = INT_MAX;
     } else {
-        LOGERROR("BUG: invalid ordering mode passed in\n");
+        LOGERROR("BUG: invalid ordering mode passed to routine\n");
     }
 
     rule->flushed = 0;
@@ -964,12 +973,14 @@ int ipt_chain_flush(ipt_handler * ipth, char *tablename, char *chainname)
 //!
 int ipt_handler_free(ipt_handler * ipth)
 {
-    int i, j, k;
-    char saved_cmdprefix[MAX_PATH];
+    int i = 0;
+    int j = 0;
+    char saved_cmdprefix[EUCA_MAX_PATH] = "";
+
     if (!ipth || !ipth->init) {
         return (1);
     }
-    snprintf(saved_cmdprefix, MAX_PATH, "%s", ipth->cmdprefix);
+    snprintf(saved_cmdprefix, EUCA_MAX_PATH, "%s", ipth->cmdprefix);
 
     for (i = 0; i < ipth->max_tables; i++) {
         for (j = 0; j < ipth->tables[i].max_chains; j++) {
@@ -1044,33 +1055,33 @@ int ipt_handler_print(ipt_handler * ipth)
 int ips_handler_init(ips_handler * ipsh, char *cmdprefix)
 {
     int fd;
-    char cmd[MAX_PATH];
+    char cmd[EUCA_MAX_PATH];
 
     if (!ipsh) {
-        LOGERROR("null passed to ips_handler_init()\n");
+        LOGERROR("invalid input\n");
         return (1);
     }
     bzero(ipsh, sizeof(ips_handler));
 
-    snprintf(ipsh->ips_file, MAX_PATH, "/tmp/ips_file-XXXXXX");
+    snprintf(ipsh->ips_file, EUCA_MAX_PATH, "/tmp/ips_file-XXXXXX");
     fd = safe_mkstemp(ipsh->ips_file);
     if (fd < 0) {
-        LOGERROR("cannot open ips_file '%s'\n", ipsh->ips_file);
+        LOGERROR("cannot create tmpfile '%s': check permissions\n", ipsh->ips_file);
         return (1);
     }
     chmod(ipsh->ips_file, 0600);
     close(fd);
 
     if (cmdprefix) {
-        snprintf(ipsh->cmdprefix, MAX_PATH, "%s", cmdprefix);
+        snprintf(ipsh->cmdprefix, EUCA_MAX_PATH, "%s", cmdprefix);
     } else {
         ipsh->cmdprefix[0] = '\0';
     }
 
     // test required shell-outs
-    snprintf(cmd, MAX_PATH, "%s ipset -L >/dev/null 2>&1", ipsh->cmdprefix);
+    snprintf(cmd, EUCA_MAX_PATH, "%s ipset -L >/dev/null 2>&1", ipsh->cmdprefix);
     if (system(cmd)) {
-        LOGERROR("could not execute required shell out (%s)\n", cmd);
+        LOGERROR("could not execute required shell out '%s': check command/permissions\n", cmd);
         return (1);
     }
 
@@ -1095,14 +1106,14 @@ int ips_handler_init(ips_handler * ipsh, char *cmdprefix)
 //!
 int ips_system_save(ips_handler * ipsh)
 {
-    int rc, fd;
-    char cmd[MAX_PATH];
+    int rc = 0;
+    char cmd[EUCA_MAX_PATH] = "";
 
-    snprintf(cmd, MAX_PATH, "%s ipset save > %s", ipsh->cmdprefix, ipsh->ips_file);
+    snprintf(cmd, EUCA_MAX_PATH, "%s ipset save > %s", ipsh->cmdprefix, ipsh->ips_file);
     rc = system(cmd);
     rc = rc >> 8;
     if (rc) {
-        LOGERROR("failed to execute ipset save (%s)\n", cmd);
+        LOGERROR("ipset save failed '%s'\n", cmd);
     }
     return (rc);
 }
@@ -1125,15 +1136,17 @@ int ips_system_save(ips_handler * ipsh)
 int ips_system_restore(ips_handler * ipsh)
 {
     int rc;
-    char cmd[MAX_PATH];
+    char cmd[EUCA_MAX_PATH];
 
-    snprintf(cmd, MAX_PATH, "%s ipset -! restore < %s", ipsh->cmdprefix, ipsh->ips_file);
+    snprintf(cmd, EUCA_MAX_PATH, "%s ipset -! restore < %s", ipsh->cmdprefix, ipsh->ips_file);
     rc = system(cmd);
     rc = rc >> 8;
     LOGDEBUG("RESTORE CMD: %s\n", cmd);
     if (rc) {
-        LOGERROR("failed to execute ipset restore (%s)\n", cmd);
+        copy_file(ipsh->ips_file, "/tmp/euca_ips_file_failed");
+        LOGERROR("ipset restore failed '%s': copying failed input file to '/tmp/euca_ips_file_failed' for manual retry.\n", cmd);
     }
+    unlink(ipsh->ips_file);
     return (rc);
 }
 
@@ -1154,10 +1167,12 @@ int ips_system_restore(ips_handler * ipsh)
 //!
 int ips_handler_repopulate(ips_handler * ipsh)
 {
-    int i, rc;
+    int rc = 0, nm = 0;
     FILE *FH = NULL;
-    char buf[1024], tmpbuf[1024], *strptr = NULL;
-    char setname[64], ipname[64];
+    char buf[1024] = "";
+    char *strptr = NULL;
+    char setname[64] = "";
+    char ipname[64] = "", *ip = NULL;
 
     if (!ipsh || !ipsh->init) {
         return (1);
@@ -1170,13 +1185,13 @@ int ips_handler_repopulate(ips_handler * ipsh)
 
     rc = ips_system_save(ipsh);
     if (rc) {
-        LOGERROR("could not save current IPS rules to file, skipping re-populate\n");
+        LOGERROR("could not save current IPS rules to file, exiting re-populate\n");
         return (1);
     }
 
     FH = fopen(ipsh->ips_file, "r");
     if (!FH) {
-        LOGERROR("could not open file for read(%s)\n", ipsh->ips_file);
+        LOGERROR("could not open file for read '%s': check permissions\n", ipsh->ips_file);
         return (1);
     }
 
@@ -1201,16 +1216,51 @@ int ips_handler_repopulate(ips_handler * ipsh)
             }
         } else if (strstr(buf, "add")) {
             ipname[0] = '\0';
-            sscanf(buf, "add %s %[0-9.]", setname, ipname);
+            sscanf(buf, "add %s %[0-9./]", setname, ipname);
             if (strlen(setname) && strlen(ipname)) {
-                ips_set_add_ip(ipsh, setname, ipname);
+                rc = cidrsplit(ipname, &ip, &nm);
+                if (ip && strlen(ip) && nm >= 0 && nm <= 32) {
+                    LOGDEBUG("reading in from ipset: adding ip/nm %s/%d to ipset %s\n", SP(ip), nm, SP(setname));
+                    ips_set_add_net(ipsh, setname, ip, nm);
+                    EUCA_FREE(ip);
+                }
             }
         } else {
-            LOGWARN("unknown IPS rule on ingress, will be thrown out: (%s)\n", buf);
+            LOGWARN("unknown IPS rule on ingress, rule will be thrown out: (%s)\n", buf);
         }
     }
     fclose(FH);
 
+    return (0);
+}
+
+int cidrsplit(char *ipname, char **ippart, int *nmpart)
+{
+    char *idx = NULL;
+    if (!ipname || !ippart || !nmpart) {
+        LOGERROR("invalid input\n");
+        return (1);
+    }
+
+    *ippart = NULL;
+    *nmpart = 0;
+
+    idx = strchr(ipname, '/');
+    if (idx) {
+        //nm part is present
+        *idx = '\0';
+        idx++;
+        *nmpart = atoi(idx);
+        if (*nmpart < 0 || *nmpart > 32) {
+            LOGERROR("invalid netmask specified from input '%s': setting netmask to '/32'\n", ipname);
+            *nmpart = 32;
+        }
+        *ippart = strdup(ipname);
+    } else {
+        // nm part is not present, use \32
+        *nmpart = 32;
+        *ippart = strdup(ipname);
+    }
     return (0);
 }
 
@@ -1232,7 +1282,8 @@ int ips_handler_repopulate(ips_handler * ipsh)
 //!
 int ips_handler_deploy(ips_handler * ipsh, int dodelete)
 {
-    int i, j, k;
+    int i = 0;
+    int j = 0;
     FILE *FH = NULL;
     char *strptra = NULL;
 
@@ -1242,16 +1293,17 @@ int ips_handler_deploy(ips_handler * ipsh, int dodelete)
 
     FH = fopen(ipsh->ips_file, "w");
     if (!FH) {
-        LOGERROR("could not open file for write(%s)\n", ipsh->ips_file);
+        LOGERROR("could not open file for write '%s': check permissions\n", ipsh->ips_file);
         return (1);
     }
     for (i = 0; i < ipsh->max_sets; i++) {
         if (ipsh->sets[i].ref_count) {
-            fprintf(FH, "create %s hash:ip family inet hashsize 2048 maxelem 65536\n", ipsh->sets[i].name);
+            fprintf(FH, "create %s hash:net family inet hashsize 2048 maxelem 65536\n", ipsh->sets[i].name);
             fprintf(FH, "flush %s\n", ipsh->sets[i].name);
             for (j = 0; j < ipsh->sets[i].max_member_ips; j++) {
                 strptra = hex2dot(ipsh->sets[i].member_ips[j]);
-                fprintf(FH, "add %s %s\n", ipsh->sets[i].name, strptra);
+                LOGDEBUG("adding ip/nm %s/%d to ipset %s\n", strptra, ipsh->sets[i].member_nms[j], ipsh->sets[i].name);
+                fprintf(FH, "add %s %s/%d\n", ipsh->sets[i].name, strptra, ipsh->sets[i].member_nms[j]);
                 EUCA_FREE(strptra);
             }
         } else if ((ipsh->sets[i].ref_count == 0) && dodelete) {
@@ -1344,6 +1396,7 @@ ips_set *ips_handler_find_set(ips_handler * ipsh, char *findset)
 //! @param[in] ipsh pointer to the IP set handler structure
 //! @param[in] setname
 //! @param[in] ipname
+//! @param[in] nmname
 //!
 //! @return
 //!
@@ -1357,6 +1410,29 @@ ips_set *ips_handler_find_set(ips_handler * ipsh, char *findset)
 //!
 int ips_set_add_ip(ips_handler * ipsh, char *setname, char *ipname)
 {
+    return (ips_set_add_net(ipsh, setname, ipname, 32));
+}
+
+//!
+//! Function description.
+//!
+//! @param[in] ipsh pointer to the IP set handler structure
+//! @param[in] setname
+//! @param[in] ipname
+//! @param[in] nmname
+//!
+//! @return
+//!
+//! @see
+//!
+//! @pre List of pre-conditions
+//!
+//! @post List of post conditions
+//!
+//! @note
+//!
+int ips_set_add_net(ips_handler * ipsh, char *setname, char *ipname, int nmname)
+{
     ips_set *set = NULL;
     u32 *ip = NULL;
     if (!ipsh || !setname || !ipname || !ipsh->init) {
@@ -1368,19 +1444,32 @@ int ips_set_add_ip(ips_handler * ipsh, char *setname, char *ipname)
         return (1);
     }
 
-    ip = ips_set_find_ip(ipsh, setname, ipname);
+    ip = ips_set_find_net(ipsh, setname, ipname, nmname);
     if (!ip) {
         set->member_ips = realloc(set->member_ips, sizeof(u32) * (set->max_member_ips + 1));
         if (!set->member_ips) {
             LOGFATAL("out of memory!\n");
             exit(1);
         }
+        set->member_nms = realloc(set->member_nms, sizeof(int) * (set->max_member_ips + 1));
+        if (!set->member_nms) {
+            LOGFATAL("out of memory!\n");
+            exit(1);
+        }
+
         bzero(&(set->member_ips[set->max_member_ips]), sizeof(u32));
+        bzero(&(set->member_nms[set->max_member_ips]), sizeof(int));
         set->member_ips[set->max_member_ips] = dot2hex(ipname);
+        set->member_nms[set->max_member_ips] = nmname;
         set->max_member_ips++;
         set->ref_count++;
     }
     return (0);
+}
+
+u32 *ips_set_find_ip(ips_handler * ipsh, char *setname, char *findipstr)
+{
+    return (ips_set_find_net(ipsh, setname, findipstr, 32));
 }
 
 //!
@@ -1400,7 +1489,7 @@ int ips_set_add_ip(ips_handler * ipsh, char *setname, char *ipname)
 //!
 //! @note
 //!
-u32 *ips_set_find_ip(ips_handler * ipsh, char *setname, char *findipstr)
+u32 *ips_set_find_net(ips_handler * ipsh, char *setname, char *findipstr, int findnm)
 {
     int i, found = 0, ipidx = 0;
     ips_set *set = NULL;
@@ -1419,7 +1508,7 @@ u32 *ips_set_find_ip(ips_handler * ipsh, char *setname, char *findipstr)
     found = 0;
     for (i = 0; i < set->max_member_ips && !found; i++) {
         ipidx = i;
-        if (set->member_ips[i] == findip)
+        if (set->member_ips[i] == findip && set->member_nms[i] == findnm)
             found++;
     }
 
@@ -1460,6 +1549,7 @@ int ips_set_flush(ips_handler * ipsh, char *setname)
     }
 
     EUCA_FREE(set->member_ips);
+    EUCA_FREE(set->member_nms);
     set->max_member_ips = set->ref_count = 0;
 
     return (0);
@@ -1483,8 +1573,8 @@ int ips_set_flush(ips_handler * ipsh, char *setname)
 //!
 int ips_handler_deletesetmatch(ips_handler * ipsh, char *setmatch)
 {
-    int i, found = 0;
-    ips_set *set = NULL;
+    int i = 0;
+    int found = 0;
 
     if (!ipsh || !setmatch || !ipsh->init) {
         return (1);
@@ -1494,6 +1584,7 @@ int ips_handler_deletesetmatch(ips_handler * ipsh, char *setmatch)
     for (i = 0; i < ipsh->max_sets && !found; i++) {
         if (strstr(ipsh->sets[i].name, setmatch)) {
             EUCA_FREE(ipsh->sets[i].member_ips);
+            EUCA_FREE(ipsh->sets[i].member_nms);
             ipsh->sets[i].max_member_ips = 0;
             ipsh->sets[i].ref_count = 0;
         }
@@ -1519,15 +1610,17 @@ int ips_handler_deletesetmatch(ips_handler * ipsh, char *setmatch)
 //!
 int ips_handler_free(ips_handler * ipsh)
 {
-    int i, j, k;
-    char saved_cmdprefix[MAX_PATH];
+    int i = 0;
+    char saved_cmdprefix[EUCA_MAX_PATH] = "";
+
     if (!ipsh || !ipsh->init) {
         return (1);
     }
-    snprintf(saved_cmdprefix, MAX_PATH, "%s", ipsh->cmdprefix);
+    snprintf(saved_cmdprefix, EUCA_MAX_PATH, "%s", ipsh->cmdprefix);
 
     for (i = 0; i < ipsh->max_sets; i++) {
         EUCA_FREE(ipsh->sets[i].member_ips);
+        EUCA_FREE(ipsh->sets[i].member_nms);
     }
     EUCA_FREE(ipsh->sets);
 
@@ -1565,7 +1658,7 @@ int ips_handler_print(ips_handler * ipsh)
             LOGTRACE("IPSET NAME: %s\n", ipsh->sets[i].name);
             for (j = 0; j < ipsh->sets[i].max_member_ips; j++) {
                 strptra = hex2dot(ipsh->sets[i].member_ips[j]);
-                LOGTRACE("\t MEMBER IP: %s\n", strptra);
+                LOGTRACE("\t MEMBER IP: %s/%d\n", strptra, ipsh->sets[i].member_nms[j]);
                 EUCA_FREE(strptra);
             }
         }
@@ -1592,42 +1685,55 @@ int ips_handler_print(ips_handler * ipsh)
 int ebt_handler_init(ebt_handler * ebth, char *cmdprefix)
 {
     int fd;
-    char cmd[MAX_PATH];
+    char cmd[EUCA_MAX_PATH];
 
     if (!ebth) {
         return (1);
     }
     bzero(ebth, sizeof(ebt_handler));
 
-    snprintf(ebth->ebt_file, MAX_PATH, "/tmp/ebt_file-XXXXXX");
-    fd = safe_mkstemp(ebth->ebt_file);
+    snprintf(ebth->ebt_filter_file, EUCA_MAX_PATH, "/tmp/ebt_filter_file-XXXXXX");
+    fd = safe_mkstemp(ebth->ebt_filter_file);
     if (fd < 0) {
-        LOGERROR("cannot open ebt_file '%s'\n", ebth->ebt_file);
+        LOGERROR("cannot create tmpfile '%s': check permissions\n", ebth->ebt_filter_file);
         return (1);
     }
-    chmod(ebth->ebt_file, 0600);
+    chmod(ebth->ebt_filter_file, 0600);
     close(fd);
 
-    snprintf(ebth->ebt_asc_file, MAX_PATH, "/tmp/ebt_asc_file-XXXXXX");
-    fd = safe_mkstemp(ebth->ebt_asc_file);
+    snprintf(ebth->ebt_nat_file, EUCA_MAX_PATH, "/tmp/ebt_nat_file-XXXXXX");
+    fd = safe_mkstemp(ebth->ebt_nat_file);
     if (fd < 0) {
-        LOGERROR("cannot open ebt_asc_file '%s'\n", ebth->ebt_asc_file);
-        unlink(ebth->ebt_file);
+        LOGERROR("cannot create tmpfile '%s': check permissions\n", ebth->ebt_nat_file);
         return (1);
     }
-    chmod(ebth->ebt_file, 0600);
+    chmod(ebth->ebt_nat_file, 0600);
+    close(fd);
+
+    snprintf(ebth->ebt_asc_file, EUCA_MAX_PATH, "/tmp/ebt_asc_file-XXXXXX");
+    fd = safe_mkstemp(ebth->ebt_asc_file);
+    if (fd < 0) {
+        LOGERROR("cannot create tmpfile '%s': check permissions\n", ebth->ebt_asc_file);
+        unlink(ebth->ebt_filter_file);
+        unlink(ebth->ebt_nat_file);
+        return (1);
+    }
+    chmod(ebth->ebt_asc_file, 0600);
     close(fd);
 
     if (cmdprefix) {
-        snprintf(ebth->cmdprefix, MAX_PATH, "%s", cmdprefix);
+        snprintf(ebth->cmdprefix, EUCA_MAX_PATH, "%s", cmdprefix);
     } else {
         ebth->cmdprefix[0] = '\0';
     }
 
     // test required shell-outs
-    snprintf(cmd, MAX_PATH, "%s ebtables -L >/dev/null 2>&1", ebth->cmdprefix);
+    snprintf(cmd, EUCA_MAX_PATH, "%s ebtables -L >/dev/null 2>&1", ebth->cmdprefix);
     if (system(cmd)) {
-        LOGERROR("could not execute required shell out (%s)\n", cmd);
+        LOGERROR("could not execute required shell out '%s': check command/permissions\n", cmd);
+        unlink(ebth->ebt_filter_file);
+        unlink(ebth->ebt_nat_file);
+        unlink(ebth->ebt_asc_file);
         return (1);
     }
 
@@ -1652,23 +1758,41 @@ int ebt_handler_init(ebt_handler * ebth, char *cmdprefix)
 //!
 int ebt_system_save(ebt_handler * ebth)
 {
-    int rc, ret, fd;
-    char cmd[MAX_PATH];
+    int rc = 0;
+    int ret = 0;
+    char cmd[EUCA_MAX_PATH] = "";
 
     ret = 0;
-    snprintf(cmd, MAX_PATH, "%s ebtables --atomic-file %s --atomic-save", ebth->cmdprefix, ebth->ebt_file);
+
+    snprintf(cmd, EUCA_MAX_PATH, "%s ebtables --atomic-file %s -t filter --atomic-save", ebth->cmdprefix, ebth->ebt_filter_file);
     rc = system(cmd);
     rc = rc >> 8;
     if (rc) {
-        LOGERROR("failed to execute ebtables-save (%s)\n", cmd);
+        LOGERROR("ebtables-save failed '%s'\n", cmd);
         ret = 1;
     }
 
-    snprintf(cmd, MAX_PATH, "%s ebtables --atomic-file %s -L > %s", ebth->cmdprefix, ebth->ebt_file, ebth->ebt_asc_file);
+    snprintf(cmd, EUCA_MAX_PATH, "%s ebtables --atomic-file %s -t nat --atomic-save", ebth->cmdprefix, ebth->ebt_nat_file);
     rc = system(cmd);
     rc = rc >> 8;
     if (rc) {
-        LOGERROR("failed to execute ebtables list (%s)\n", cmd);
+        LOGERROR("ebtables-save failed '%s'\n", cmd);
+        ret = 1;
+    }
+
+    snprintf(cmd, EUCA_MAX_PATH, "%s ebtables --atomic-file %s -t filter -L > %s", ebth->cmdprefix, ebth->ebt_filter_file, ebth->ebt_asc_file);
+    rc = system(cmd);
+    rc = rc >> 8;
+    if (rc) {
+        LOGERROR("ebtables-list failed '%s'\n", cmd);
+        ret = 1;
+    }
+
+    snprintf(cmd, EUCA_MAX_PATH, "%s ebtables --atomic-file %s -t nat -L >> %s", ebth->cmdprefix, ebth->ebt_nat_file, ebth->ebt_asc_file);
+    rc = system(cmd);
+    rc = rc >> 8;
+    if (rc) {
+        LOGERROR("ebtables-list failed '%s'\n", cmd);
         ret = 1;
     }
 
@@ -1693,14 +1817,28 @@ int ebt_system_save(ebt_handler * ebth)
 int ebt_system_restore(ebt_handler * ebth)
 {
     int rc;
-    char cmd[MAX_PATH];
+    char cmd[EUCA_MAX_PATH];
 
-    snprintf(cmd, MAX_PATH, "%s ebtables --atomic-file %s --atomic-commit", ebth->cmdprefix, ebth->ebt_file);
+    snprintf(cmd, EUCA_MAX_PATH, "%s ebtables --atomic-file %s -t filter --atomic-commit", ebth->cmdprefix, ebth->ebt_filter_file);
     rc = system(cmd);
     rc = rc >> 8;
     if (rc) {
-        LOGERROR("failed to execute ebtables-restore (%s)\n", cmd);
+        copy_file(ebth->ebt_filter_file, "/tmp/euca_ebt_filter_file_failed");
+        LOGERROR("ebtables-restore failed '%s': copying failed input file to '/tmp/euca_ebt_filter_file_failed' for manual retry.\n", cmd);
     }
+    unlink(ebth->ebt_filter_file);
+
+    snprintf(cmd, EUCA_MAX_PATH, "%s ebtables --atomic-file %s -t nat --atomic-commit", ebth->cmdprefix, ebth->ebt_nat_file);
+    rc = system(cmd);
+    rc = rc >> 8;
+    if (rc) {
+        copy_file(ebth->ebt_nat_file, "/tmp/euca_ebt_nat_file_failed");
+        LOGERROR("ebtables-restore failed '%s': copying failed input file to '/tmp/euca_ebt_nat_file_failed' for manual retry.\n", cmd);
+    }
+    unlink(ebth->ebt_nat_file);
+
+    unlink(ebth->ebt_asc_file);
+
     return (rc);
 }
 
@@ -1721,9 +1859,11 @@ int ebt_system_restore(ebt_handler * ebth)
 //!
 int ebt_handler_deploy(ebt_handler * ebth)
 {
-    int i, j, k, rc;
-    char cmd[MAX_PATH];
-    FILE *FH = NULL;
+    int i = 0;
+    int j = 0;
+    int k = 0;
+    int rc = 0;
+    char cmd[EUCA_MAX_PATH] = "";
 
     if (!ebth || !ebth->init) {
         return (1);
@@ -1731,35 +1871,57 @@ int ebt_handler_deploy(ebt_handler * ebth)
 
     ebt_handler_update_refcounts(ebth);
 
-    snprintf(cmd, MAX_PATH, "%s ebtables --atomic-file %s --atomic-init", ebth->cmdprefix, ebth->ebt_file);
+    snprintf(cmd, EUCA_MAX_PATH, "%s ebtables --atomic-file %s -t filter --atomic-init", ebth->cmdprefix, ebth->ebt_filter_file);
     rc = system(cmd);
     rc = rc >> 8;
     if (rc) {
-        LOGERROR("failed to execute ebtables-save (%s)\n", cmd);
+        LOGERROR("ebtables-save failed '%s'\n", cmd);
+        return (1);
+    }
+
+    snprintf(cmd, EUCA_MAX_PATH, "%s ebtables --atomic-file %s -t nat --atomic-init", ebth->cmdprefix, ebth->ebt_nat_file);
+    rc = system(cmd);
+    rc = rc >> 8;
+    if (rc) {
+        LOGERROR("ebtables-save failed '%s'\n", cmd);
         return (1);
     }
 
     for (i = 0; i < ebth->max_tables; i++) {
         for (j = 0; j < ebth->tables[i].max_chains; j++) {
             if (strcmp(ebth->tables[i].chains[j].name, "EMPTY") && ebth->tables[i].chains[j].ref_count) {
-                if (strcmp(ebth->tables[i].chains[j].name, "INPUT") && strcmp(ebth->tables[i].chains[j].name, "OUTPUT") && strcmp(ebth->tables[i].chains[j].name, "FORWARD")) {
-                    snprintf(cmd, MAX_PATH, "%s ebtables --atomic-file %s -N %s", ebth->cmdprefix, ebth->ebt_file, ebth->tables[i].chains[j].name);
+                if (strcmp(ebth->tables[i].chains[j].name, "INPUT") && strcmp(ebth->tables[i].chains[j].name, "OUTPUT") && strcmp(ebth->tables[i].chains[j].name, "FORWARD")
+                    && strcmp(ebth->tables[i].chains[j].name, "PREROUTING") && strcmp(ebth->tables[i].chains[j].name, "POSTROUTING")) {
+                    if (!strcmp(ebth->tables[i].name, "filter")) {
+                        snprintf(cmd, EUCA_MAX_PATH, "%s ebtables --atomic-file %s -t %s -N %s", ebth->cmdprefix, ebth->ebt_filter_file, ebth->tables[i].name,
+                                 ebth->tables[i].chains[j].name);
+                    } else if (!strcmp(ebth->tables[i].name, "nat")) {
+                        snprintf(cmd, EUCA_MAX_PATH, "%s ebtables --atomic-file %s -t %s -N %s", ebth->cmdprefix, ebth->ebt_nat_file, ebth->tables[i].name,
+                                 ebth->tables[i].chains[j].name);
+                    }
                     rc = system(cmd);
                     rc = rc >> 8;
+                    LOGTRACE("executed command (exit=%d): %s\n", rc, cmd);
                     if (rc)
-                        LOGERROR("cmd failed: rc '%d'\n", rc);
+                        LOGERROR("command failed: exitcode=%d command=%s\n", rc, cmd);
                 }
             }
         }
         for (j = 0; j < ebth->tables[i].max_chains; j++) {
             if (strcmp(ebth->tables[i].chains[j].name, "EMPTY") && ebth->tables[i].chains[j].ref_count) {
                 for (k = 0; k < ebth->tables[i].chains[j].max_rules; k++) {
-                    snprintf(cmd, MAX_PATH, "%s ebtables --atomic-file %s -A %s %s", ebth->cmdprefix, ebth->ebt_file, ebth->tables[i].chains[j].name,
-                             ebth->tables[i].chains[j].rules[k].ebtrule);
+                    if (!strcmp(ebth->tables[i].name, "filter")) {
+                        snprintf(cmd, EUCA_MAX_PATH, "%s ebtables --atomic-file %s -t %s -A %s %s", ebth->cmdprefix, ebth->ebt_filter_file, ebth->tables[i].name,
+                                 ebth->tables[i].chains[j].name, ebth->tables[i].chains[j].rules[k].ebtrule);
+                    } else if (!strcmp(ebth->tables[i].name, "nat")) {
+                        snprintf(cmd, EUCA_MAX_PATH, "%s ebtables --atomic-file %s -t %s -A %s %s", ebth->cmdprefix, ebth->ebt_nat_file, ebth->tables[i].name,
+                                 ebth->tables[i].chains[j].name, ebth->tables[i].chains[j].rules[k].ebtrule);
+                    }
                     rc = system(cmd);
                     rc = rc >> 8;
+                    LOGTRACE("executed command (exit=%d): %s\n", rc, cmd);
                     if (rc)
-                        LOGERROR("cmd failed: rc '%d'\n", rc);
+                        LOGERROR("command failed: exitcode=%d command=%s\n", rc, cmd);
                 }
             }
         }
@@ -1784,10 +1946,14 @@ int ebt_handler_deploy(ebt_handler * ebth)
 //!
 int ebt_handler_repopulate(ebt_handler * ebth)
 {
-    int i, rc;
+    int rc = 0;
     FILE *FH = NULL;
-    char buf[1024], tmpbuf[1024], *strptr = NULL;
-    char tablename[64], chainname[64], policyname[64], counters[64];
+    char buf[1024] = "";
+    char tmpbuf[1024] = "";
+    char *strptr = NULL;
+    char tablename[64] = "";
+    char chainname[64] = "";
+    char policyname[64] = "";
 
     if (!ebth || !ebth->init) {
         return (1);
@@ -1800,13 +1966,13 @@ int ebt_handler_repopulate(ebt_handler * ebth)
 
     rc = ebt_system_save(ebth);
     if (rc) {
-        LOGERROR("could not save current EBT rules to file, skipping re-populate\n");
+        LOGERROR("could not save current EBT rules to file, exiting re-populate\n");
         return (1);
     }
 
     FH = fopen(ebth->ebt_asc_file, "r");
     if (!FH) {
-        LOGERROR("could not open file for read(%s)\n", ebth->ebt_file);
+        LOGERROR("could not open file for read '%s': check permissions\n", ebth->ebt_asc_file);
         return (1);
     }
 
@@ -2313,12 +2479,13 @@ int ebt_chain_flush(ebt_handler * ebth, char *tablename, char *chainname)
 //!
 int ebt_handler_free(ebt_handler * ebth)
 {
-    int i, j, k;
-    char saved_cmdprefix[MAX_PATH];
+    int i = 0;
+    int j = 0;
+    char saved_cmdprefix[EUCA_MAX_PATH] = "";
     if (!ebth || !ebth->init) {
         return (1);
     }
-    snprintf(saved_cmdprefix, MAX_PATH, "%s", ebth->cmdprefix);
+    snprintf(saved_cmdprefix, EUCA_MAX_PATH, "%s", ebth->cmdprefix);
 
     for (i = 0; i < ebth->max_tables; i++) {
         for (j = 0; j < ebth->tables[i].max_chains; j++) {
@@ -2327,7 +2494,9 @@ int ebt_handler_free(ebt_handler * ebth)
         EUCA_FREE(ebth->tables[i].chains);
     }
     EUCA_FREE(ebth->tables);
-    unlink(ebth->ebt_file);
+
+    unlink(ebth->ebt_filter_file);
+    unlink(ebth->ebt_nat_file);
     unlink(ebth->ebt_asc_file);
 
     return (ebt_handler_init(ebth, saved_cmdprefix));

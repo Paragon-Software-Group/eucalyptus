@@ -1,0 +1,12 @@
+{
+  "Statement":[ {
+    "Effect": "Allow",
+    "Action": [
+      "euprop:*",
+      "euserv:*",
+      "euconfig:*",
+      "ec2:MigrateInstances"
+    ],
+    "Resource": "*"
+  } ]
+}

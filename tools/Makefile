@@ -63,6 +63,7 @@
 include ../Makedefs
 
 all:
+	@make -C imaging
 
 build: all
 
@@ -70,10 +71,12 @@ deploy:
 
 clean:
 	$(RM) -f *~ *.o
+	@make -C imaging clean
 
 distclean:
 	@echo "removing generated files scripts ..."
 	@rm -rf eucalyptus eucalyptus-cloud eucalyptus-walrus eucalyptus-sc eucalyptus-nc
+	@make -C imaging distclean
 
 install: build
 	@if test -e /etc/init.d/eucalyptus ; then \
@@ -85,13 +88,12 @@ install: build
 	@$(INSTALL) -m 755 eucalyptus-nc $(DESTDIR)$(etcdir)/init.d
 	@$(INSTALL) -m 755 eucalyptus-cc $(DESTDIR)$(etcdir)/init.d
 	@$(INSTALL) -m 644 eucalyptus-logrotate.conf $(DESTDIR)$(etcdir)/logrotate.d/eucalyptus
-	@$(INSTALL) -m 755 eucalyptus-eucanetd $(DESTDIR)$(etcdir)/init.d
+	@$(INSTALL) -m 755 eucanetd $(DESTDIR)$(etcdir)/init.d
 	@$(INSTALL) -m 644 httpd.conf $(DESTDIR)$(etcdir)/eucalyptus
 	@if test -e $(DESTDIR)$(etcdir)/eucalyptus/eucalyptus.conf ; then \
 		cp $(DESTDIR)$(etcdir)/eucalyptus/eucalyptus.conf $(DESTDIR)$(etcdir)/eucalyptus/eucalyptus.conf.old ; fi
 	@$(INSTALL) -m 644 eucalyptus.conf $(DESTDIR)$(etcdir)/eucalyptus
 	@$(INSTALL) -m 644 vtunall.conf.template $(DESTDIR)$(datarootdir)/eucalyptus
-	@$(INSTALL) -m 755 add_key.pl $(DESTDIR)$(datarootdir)/eucalyptus
 	@$(INSTALL) -m 755 gen_libvirt_xml $(DESTDIR)$(datarootdir)/eucalyptus
 	@$(INSTALL) -m 755 gen_kvm_libvirt_xml $(DESTDIR)$(datarootdir)/eucalyptus
 	@$(INSTALL) -m 755 detach.pl $(DESTDIR)$(datarootdir)/eucalyptus
@@ -99,12 +101,10 @@ install: build
 	@$(INSTALL) -m 755 get_xen_info $(DESTDIR)$(datarootdir)/eucalyptus/get_xen_info
 	@$(INSTALL) -m 755 get_sys_info $(DESTDIR)$(datarootdir)/eucalyptus/get_sys_info
 	@$(INSTALL) -m 755 euca_ipt $(DESTDIR)$(datarootdir)/eucalyptus
-	@$(INSTALL) -m 755 euca_upgrade $(DESTDIR)$(datarootdir)/eucalyptus
 	@$(INSTALL) -m 755 populate_arp.pl $(DESTDIR)$(datarootdir)/eucalyptus
 #	@$(INSTALL) -m 755 euca_conf $(DESTDIR)$(sbindir)
 #	-$(INSTALL) -m 755 euca_conf.complete $(DESTDIR)$(etcdir)/bash_completion.d/euca_conf
 #	@$(INSTALL) -m 755 eucanetd $(DESTDIR)$(sbindir)
-	@$(INSTALL) -m 755 euca_sync_key $(DESTDIR)$(sbindir)
 	@$(INSTALL) -m 755 connect_iscsitarget.pl $(DESTDIR)$(datarootdir)/eucalyptus
 	@$(INSTALL) -m 755 connect_iscsitarget_sc.pl $(DESTDIR)$(datarootdir)/eucalyptus
 	@$(INSTALL) -m 755 connect_iscsitarget_main.pl $(DESTDIR)$(datarootdir)/eucalyptus
@@ -119,6 +119,7 @@ install: build
 	@$(INSTALL) -m 644 libvirt-xen-windows-example.xml $(DESTDIR)$(datarootdir)/eucalyptus/doc/
 	@$(INSTALL) -m 755 getstats.pl $(DESTDIR)$(datarootdir)/eucalyptus
 	@$(INSTALL) -m 755 getstats_net.pl $(DESTDIR)$(datarootdir)/eucalyptus
+	@$(INSTALL) -m 755 get_bundle $(DESTDIR)$(datarootdir)/eucalyptus
 	@$(INSTALL) -m 755 euca-lictool $(DESTDIR)$(sbindir)
 	@$(INSTALL) -m 755 lic_template $(DESTDIR)$(datarootdir)/eucalyptus
 	@$(INSTALL) -m 755 lic_default $(DESTDIR)$(datarootdir)/eucalyptus
@@ -128,18 +129,19 @@ install: build
 	@$(INSTALL) -m 755 generate-migration-keys.sh $(DESTDIR)$(datarootdir)/eucalyptus
 	@$(INSTALL) -m 755 authorize-migration-keys.pl $(DESTDIR)$(datarootdir)/eucalyptus
 	@$(INSTALL) -m 755 conntrack_kernel_params $(DESTDIR)$(libexecdir)/eucalyptus
+	@$(INSTALL) -m 755 euca-upgrade $(DESTDIR)$(libexecdir)/eucalyptus
 	@$(INSTALL) -m 644 iptables-preload.template $(DESTDIR)$(datarootdir)/eucalyptus/doc/
+	@make -C imaging install
 
 uninstall:
 	@$(RM) -f $(DESTDIR)$(etcdir)/init.d/eucalyptus-cloud
 	@$(RM) -f $(DESTDIR)$(etcdir)/init.d/eucalyptus-nc
 	@$(RM) -f $(DESTDIR)$(etcdir)/init.d/eucalyptus-cc
-	@$(RM) -f $(DESTDIR)$(etcdir)/init.d/eucalyptus-eucanetd
+	@$(RM) -f $(DESTDIR)$(etcdir)/init.d/eucanetd
 	@$(RM) -f $(DESTDIR)$(etcdir)/logrotate.d/eucalyptus
 	@$(RM) -f $(DESTDIR)$(etcdir)/eucalyptus/httpd*
 	@$(RM) -f $(DESTDIR)$(etcdir)/eucalyptus/eucalyptus.conf
 	@$(RM) -f $(DESTDIR)$(datarootdir)/eucalyptus/vtunall.conf.template
-	@$(RM) -f $(DESTDIR)$(datarootdir)/eucalyptus/add_key.pl
 	@$(RM) -f $(DESTDIR)$(datarootdir)/eucalyptus/gen_libvirt_xml
 	@$(RM) -f $(DESTDIR)$(datarootdir)/eucalyptus/gen_kvm_libvirt_xml
 	@$(RM) -f $(DESTDIR)$(datarootdir)/eucalyptus/detach.pl
@@ -147,11 +149,9 @@ uninstall:
 	@$(RM) -f $(DESTDIR)$(datarootdir)/eucalyptus/get_xen_info
 	@$(RM) -f $(DESTDIR)$(datarootdir)/eucalyptus/get_sys_info
 	@$(RM) -f $(DESTDIR)$(datarootdir)/eucalyptus/euca_ipt
-	@$(RM) -f $(DESTDIR)$(datarootdir)/eucalyptus/euca_upgrade
 	@$(RM) -f $(DESTDIR)$(datarootdir)/eucalyptus/populate_arp.pl
 	@$(RM) -f $(DESTDIR)$(sbindir)/euca_conf
 	@$(RM) -f $(DESTDIR)$(etcdir)/bash_completion.d/euca_conf
-	@$(RM) -f $(DESTDIR)$(sbindir)/euca_sync_key
 	@$(RM) -f $(DESTDIR)$(datarootdir)/eucalyptus/lic_template
 	@$(RM) -f $(DESTDIR)$(datarootdir)/eucalyptus/lic_default
 	@$(RM) -f $(DESTDIR)$(sbindir)/euca-lictool
@@ -159,4 +159,6 @@ uninstall:
 	@$(RM) -f $(DESTDIR)$(datarootdir)/eucalyptus/generate-migration-keys.sh
 	@$(RM) -f $(DESTDIR)$(datarootdir)/eucalyptus/authorize-migration-keys.pl
 	@$(RM) -f $(DESTDIR)$(libexecdir)/eucalyptus/conntrack_kernel_params
+	@$(RM) -f $(DESTDIR)$(libexecdir)/eucalyptus/euca-upgrade
 	@$(RM) -f $(DESTDIR)$(datarootdir)/eucalyptus/doc/iptables-preload.template
+	@make -C imaging uninstall

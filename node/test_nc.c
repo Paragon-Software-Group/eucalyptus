@@ -83,6 +83,7 @@
 
 #include <eucalyptus.h>
 #include <misc.h>
+#include <euca_string.h>
 #include <diskutil.h>
 
 /*----------------------------------------------------------------------------*\
@@ -140,7 +141,9 @@ const char *euca_this_component_name = "nc";    //!< Eucalyptus Component Name
 \*----------------------------------------------------------------------------*/
 
 static void print_libvirt_error(void);
+#ifdef UNUSED_CODE
 static char *find_conf_value(const char *eucahome, const char *param);
+#endif /* UNUSED_CODE */
 
 /*----------------------------------------------------------------------------*\
  |                                                                            |
@@ -159,15 +162,16 @@ static char *find_conf_value(const char *eucahome, const char *param);
 //!
 static void print_libvirt_error(void)
 {
-    virError *verr = virGetLastError();
-    if (verr != NULL) {
+    virError *verr = NULL;
+    if ((verr = virGetLastError()) != NULL) {
         fprintf(stderr, "libvirt error: %s (code=%d)\n", verr->message, verr->code);
         virResetLastError();
     }
 }
 
+#ifdef UNUSED_CODE
 //!
-//! find value of the given param in the eucalyptus.conf (e.g., /usr/bin/euca-bundle-upload for NC_BUNDLE_UPLOAD_PATH)
+//! find value of the given param in the eucalyptus.conf,
 //! return NULL if the param is commented out
 //!
 //! @param[in] eucahome the path where Eucalyptus is installed
@@ -177,19 +181,21 @@ static void print_libvirt_error(void)
 //!
 static char *find_conf_value(const char *eucahome, const char *param)
 {
-    char conf_path[1024];
-    char line[1024];
+    int i = 0;
+    int j = 0;
+    int quote = 0;
+    char *pch = NULL;
+    char conf_path[1024] = "";
+    char line[1024] = "";
     char *value = NULL;
     FILE *f_conf = NULL;
-    int i = 0;
 
     if (!eucahome || !param)
-        return NULL;
+        return (NULL);
 
     snprintf(conf_path, 1024, EUCALYPTUS_CONF_LOCATION, eucahome);
-    f_conf = fopen(conf_path, "r");
-    if (!f_conf) {
-        return NULL;
+    if ((f_conf = fopen(conf_path, "r")) == NULL) {
+        return (NULL);
     }
 
     while (fgets(line, 1024, f_conf) != NULL) {
@@ -197,13 +203,12 @@ static char *find_conf_value(const char *eucahome, const char *param)
             if (strchr(line, '#') != NULL) {    // the line is commented out (assume # can't appear in the middle)
                 break;
             } else {
-                char *pch = strtok(line, "=");  // again assume '=' can't appear in the middle of value
+                pch = strtok(line, "=");    // again assume '=' can't appear in the middle of value
                 pch = strtok(NULL, "=");
-                if (pch && strlen(pch) > 0) {
-                    value = EUCA_ZALLOC(strlen(pch) + 1, 1);
-                    if (!value) {
+                if (pch && (strlen(pch) > 0)) {
+                    if ((value = EUCA_ZALLOC(strlen(pch) + 1, 1)) == NULL) {
                         fclose(f_conf);
-                        return NULL;
+                        return (NULL);
                     }
                     snprintf(value, strlen(pch) + 1, "%s", pch);
                 }
@@ -215,8 +220,8 @@ static char *find_conf_value(const char *eucahome, const char *param)
 
     // remove "" from the value
     if (value) {
-        int quote = 0;
-        for (int i = 0; i < strlen(value); i++) {
+        quote = 0;
+        for (i = 0; i < strlen(value); i++) {
             if (value[i] == '\"')
                 quote++;
             else
@@ -226,9 +231,10 @@ static char *find_conf_value(const char *eucahome, const char *param)
 
         // remove spaces
         i = 0;
-        while (value[i] == ' ' || value[i] == '\t')
+        while ((value[i] == ' ') || (value[i] == '\t'))
             i++;
-        for (int j = i; j < strlen(value); j++)
+
+        for (j = i; j < strlen(value); j++)
             value[j - i] = value[j];
         value[strlen(value) - i] = 0x00;
 
@@ -237,8 +243,9 @@ static char *find_conf_value(const char *eucahome, const char *param)
     }
 
     fclose(f_conf);
-    return value;
+    return (value);
 }
+#endif /* UNUSED_CODE */
 
 //!
 //! Main entry point of the application
@@ -250,11 +257,14 @@ static char *find_conf_value(const char *eucahome, const char *param)
 //!
 int main(int argc, char *argv[])
 {
-    virConnectPtr conn = NULL;
-    int dom_ids[MAXDOMS];
+    int dom_ids[MAXDOMS] = { 0 };
     int num_doms = 0;
-    char *hypervisor, hypervisorURL[32], cmd[1024];
     char *eucahome = NULL;
+    char *hypervisor = NULL;
+    char rootWrap[EUCA_MAX_PATH] = "";
+    char cmd[EUCA_MAX_PATH] = "";
+    char hypervisorURL[32] = "";
+    virConnectPtr conn = NULL;
 
     //  logfile (NULL, EUCAFATAL); // suppress all messages
 
@@ -277,70 +287,61 @@ int main(int argc, char *argv[])
     }
 
     // check that commands that NC needs are there
-
-    if (system("perl --version")) {
+    if (euca_execlp(NULL, "perl", "--version", NULL) != EUCA_OK) {
         fprintf(stderr, "error: could not run perl\n");
         exit(1);
     }
 
-    eucahome = getenv(EUCALYPTUS_ENV_VAR_NAME);
-    if (!eucahome) {
+    if ((eucahome = getenv(EUCALYPTUS_ENV_VAR_NAME)) == NULL) {
         eucahome = strdup("");         // root by default
     } else {
         eucahome = strdup(eucahome);
+        // Sanitize this string
+        if (euca_sanitize_path(eucahome) != EUCA_OK) {
+            EUCA_FREE(eucahome);
+            eucahome = strdup("");
+        }
     }
 
     add_euca_to_path(eucahome);
 
     fprintf(stderr, "looking for system utilities...\n");
-    if (diskutil_init(FALSE))          // NC does not require GRUB for now
+    if (diskutil_init(FALSE)) {
+        // NC does not require GRUB for now
+        EUCA_FREE(eucahome);
         exit(1);
-
-    // check if euca2ools commands for bundle-instance are available
-    fprintf(stderr, "ok\n\nlooking for euca2ools...\n");
-    static char *helpers_name[3] = {
-        "euca-bundle-upload",
-        "euca-check-bucket",
-        "euca-delete-bundle"
-    };
-
-    char *helpers_path[3];             // load paths from eucalyptus.conf or set to NULL
-    helpers_path[0] = find_conf_value(eucahome, "NC_BUNDLE_UPLOAD_PATH");
-    helpers_path[1] = find_conf_value(eucahome, "NC_CHECK_BUCKET_PATH");
-    helpers_path[2] = find_conf_value(eucahome, "NC_DELETE_BUNDLE_PATH");
-
-    if (verify_helpers(helpers_name, helpers_path, 3) > 0) {
-        if (verify_helpers(helpers_name, NULL, 3) > 0) {
-            fprintf(stderr, "error: failed to find required euca2ools\n");
-            exit(1);
-        }
     }
     // ensure hypervisor information is available
     fprintf(stderr, "ok\n\nchecking the hypervisor...\n");
+    snprintf(rootWrap, sizeof(rootWrap), EUCALYPTUS_ROOTWRAP, eucahome);
     if (!strcmp(hypervisor, "kvm") || !strcmp(hypervisor, "qemu")) {
-        snprintf(cmd, 1024, EUCALYPTUS_ROOTWRAP " " EUCALYPTUS_HELPER_DIR "/get_sys_info", eucahome, eucahome);
+        snprintf(cmd, sizeof(cmd), EUCALYPTUS_HELPER_DIR "/get_sys_info", eucahome);
     } else {
-        snprintf(cmd, 1024, EUCALYPTUS_ROOTWRAP " " EUCALYPTUS_HELPER_DIR "/get_xen_info", eucahome, eucahome);
+        snprintf(cmd, sizeof(cmd), EUCALYPTUS_HELPER_DIR "/get_xen_info", eucahome);
     }
-    if (system(cmd)) {
-        fprintf(stderr, "error: could not run '%s'\n", cmd);
+
+    if (euca_execlp(NULL, rootWrap, cmd, NULL) != EUCA_OK) {
+        fprintf(stderr, "error: could not run '%s %s'\n", rootWrap, cmd);
+        EUCA_FREE(eucahome);
         exit(1);
     }
     // check that libvirt can query the hypervisor
-    conn = virConnectOpen(hypervisorURL);   // NULL means local hypervisor
-    if (conn == NULL) {
+    // NULL means local hypervisor
+    if ((conn = virConnectOpen(hypervisorURL)) == NULL) {
         print_libvirt_error();
         fprintf(stderr, "error: failed to connect to hypervisor\n");
+        EUCA_FREE(eucahome);
         exit(1);
     }
 
-    num_doms = virConnectListDomains(conn, dom_ids, MAXDOMS);
-    if (num_doms < 0) {
+    if ((num_doms = virConnectListDomains(conn, dom_ids, MAXDOMS)) < 0) {
         print_libvirt_error();
         fprintf(stderr, "error: failed to query running domains\n");
+        EUCA_FREE(eucahome);
         exit(1);
     }
 
     fprintf(stdout, "NC test was successful\n");
-    return 0;
+    EUCA_FREE(eucahome);
+    return (0);
 }

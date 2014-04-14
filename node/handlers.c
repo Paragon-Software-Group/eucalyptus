@@ -96,9 +96,6 @@
 #include <signal.h>                    /* SIGINT */
 #include <linux/limits.h>
 #include <pwd.h>                       /* getpwuid_r */
-#ifndef MAX_PATH
-#define MAX_PATH               4096    //!< Max path string length
-#endif /*  ! MAX_PATH */
 #include <netdb.h>
 #include <sys/socket.h>
 #include <netinet/in.h>
@@ -125,7 +122,7 @@
 #include "xml.h"
 #include "hooks.h"
 #include <ebs_utils.h>
-#include "walrus.h"
+#include "objectstorage.h"
 
 /*----------------------------------------------------------------------------*\
  |                                                                            |
@@ -275,7 +272,7 @@ static void printMsgServiceStateInfo(ncMetadata * pMeta);
 {                                                                                  \
     if (nc_state.is_enabled == FALSE) {                                            \
         LOGERROR("operation %s is not allowed when node is DISABLED\n", __func__); \
-        return EUCA_ERROR;                                                         \
+        return (EUCA_ERROR);                                                       \
     }                                                                              \
 }
 
@@ -304,31 +301,35 @@ static void printMsgServiceStateInfo(ncMetadata * pMeta);
 //!
 int authorize_migration_keys(char *options, char *host, char *credentials, ncInstance * instance, boolean lock_hyp_sem)
 {
-    char authorize_keys[MAX_PATH];
+    int rc = 0;
+    char command[EUCA_MAX_PATH] = "";
     char *euca_base = getenv(EUCALYPTUS_ENV_VAR_NAME);
     char *instanceId = instance ? instance->instanceId : "UNSET";
 
     if (!options && !host && !credentials) {
         LOGERROR("[%s] called with invalid arguments: options=%s, host=%s, creds=%s\n", SP(instanceId), SP(options), SP(host), (credentials == NULL) ? "UNSET" : "present");
-        return EUCA_INVALID_ERROR;
+        return (EUCA_INVALID_ERROR);
     }
 
-    snprintf(authorize_keys, MAX_PATH, EUCALYPTUS_AUTHORIZE_MIGRATION_KEYS " %s %s %s", NP(euca_base), NP(euca_base), NP(options), NP(host), NP(credentials));
-    LOGDEBUG("[%s] migration key authorization command: '%s'\n", SP(instanceId), authorize_keys);
+    snprintf(command, EUCA_MAX_PATH, EUCALYPTUS_AUTHORIZE_MIGRATION_KEYS, NP(euca_base), NP(euca_base));
+    LOGDEBUG("[%s] migration key authorization command: '%s %s %s %s'\n", SP(instanceId), command, NP(options), NP(host), NP(credentials));
     if (lock_hyp_sem == TRUE) {
         sem_p(hyp_sem);
     }
-    int sysret = system(authorize_keys);
+
+    rc = euca_execlp(NULL, command, NP(options), NP(host), NP(credentials), NULL);
+
     if (lock_hyp_sem == TRUE) {
         sem_v(hyp_sem);
     }
-    if (sysret) {
-        LOGERROR("[%s] '%s' failed with exit code %d\n", SP(instanceId), authorize_keys, WEXITSTATUS(sysret));
-        return EUCA_SYSTEM_ERROR;
+
+    if (rc != EUCA_OK) {
+        LOGERROR("[%s] '%s %s %s %s' failed. rc=%d\n", SP(instanceId), command, NP(options), NP(host), NP(credentials), rc);
+        return (EUCA_SYSTEM_ERROR);
     } else {
         LOGDEBUG("[%s] migration key authorization/deauthorization succeeded\n", SP(instanceId));
     }
-    return EUCA_OK;
+    return (EUCA_OK);
 }
 
 //!
@@ -345,12 +346,12 @@ int authorize_migration_keys(char *options, char *host, char *credentials, ncIns
 //!
 int get_service_url(const char *service_type, struct nc_state_t *nc, char *dest_buffer)
 {
-    int i = 0, j = 0;
-    int found = 0;
+    int i = 0;
+    boolean found = FALSE;
 
     if (service_type == NULL || nc == NULL || dest_buffer == NULL) {
         LOGERROR("Invalid input parameters. At least one is NULL.\n");
-        return EUCA_ERROR;
+        return (EUCA_ERROR);
     }
 
     sem_p(service_state_sem);
@@ -360,7 +361,7 @@ int get_service_url(const char *service_type, struct nc_state_t *nc, char *dest_
             //Winner!
             if (nc->services[i].urisLen > 0) {
                 euca_strncpy(dest_buffer, nc->services[i].uris[0], 512);
-                found = 1;
+                found = TRUE;
             }
         }
     }
@@ -368,12 +369,12 @@ int get_service_url(const char *service_type, struct nc_state_t *nc, char *dest_
 
     if (found) {
         LOGTRACE("Found enabled service URI for service type %s as %s\n", service_type, dest_buffer);
-        return EUCA_OK;
-    } else {
-        dest_buffer[0] = '\0';         //Ensure 0 length string
-        LOGTRACE("No enabled service found for service type %s\n", service_type);
-        return EUCA_ERROR;
+        return (EUCA_OK);
     }
+
+    dest_buffer[0] = '\0';             //Ensure 0 length string
+    LOGTRACE("No enabled service found for service type %s\n", service_type);
+    return (EUCA_ERROR);
 }
 
 //!
@@ -385,7 +386,7 @@ int get_service_url(const char *service_type, struct nc_state_t *nc, char *dest_
 //!
 static void printNCServiceStateInfo(void)
 {
-    int i = 0, j = 0;
+    int i = 0;
     //Don't bother if not at trace logging
     if (log_level_get() <= EUCA_LOG_TRACE) {
         sem_p(service_state_sem);
@@ -417,18 +418,21 @@ static void printNCServiceStateInfo(void)
 //!
 static void printMsgServiceStateInfo(ncMetadata * pMeta)
 {
-    int i = 0, j = 0;
+    int i = 0;
     //Don't bother if not at trace logging
     if (log_level_get() <= EUCA_LOG_TRACE) {
         LOGTRACE("Printing %d services\n", pMeta->servicesLen);
         LOGTRACE("Msg-Meta epoch %d\n", pMeta->epoch);
+
         for (i = 0; i < pMeta->servicesLen; i++) {
             LOGTRACE("Msg-Meta: Service - %s %s %s %s\n", pMeta->services[i].name, pMeta->services[i].partition, pMeta->services[i].type, pMeta->services[i].uris[0]);
         }
+
         for (i = 0; i < pMeta->disabledServicesLen; i++) {
             LOGTRACE("Msg-Meta: Disabled Service - %s %s %s %s\n", pMeta->disabledServices[i].name, pMeta->disabledServices[i].partition, pMeta->disabledServices[i].type,
                      pMeta->disabledServices[i].uris[0]);
         }
+
         for (i = 0; i < pMeta->servicesLen; i++) {
             LOGTRACE("Msg-Meta: Notready Service - %s %s %s %s\n", pMeta->notreadyServices[i].name, pMeta->notreadyServices[i].partition, pMeta->notreadyServices[i].type,
                      pMeta->notreadyServices[i].uris[0]);
@@ -612,7 +616,7 @@ int update_disk_aliases(ncInstance * instance)
     int j = 0;
     char *volumeId = NULL;
     char **devs = NULL;
-    char lpath[MAX_PATH] = "";
+    char lpath[EUCA_MAX_PATH] = "";
     boolean saw_ephemeral0 = FALSE;
     boolean saw_root = FALSE;
     ncVolume *volume = NULL;
@@ -1138,22 +1142,22 @@ static void refresh_instance_info(struct nc_state_t *nc, ncInstance * instance)
     if (instance->state == RUNNING || instance->state == BLOCKED || instance->state == PAUSED) {
         ip = NULL;
 
-        if (!strncmp(instance->ncnet.publicIp, "0.0.0.0", 24)) {
+        if (!strncmp(instance->ncnet.publicIp, "0.0.0.0", IP_BUFFER_SIZE)) {
             if (!strcmp(nc_state.vnetconfig->mode, "SYSTEM") || !strcmp(nc_state.vnetconfig->mode, "STATIC")) {
                 rc = mac2ip(nc_state.vnetconfig, instance->ncnet.privateMac, &ip);
                 if (!rc && ip) {
                     LOGINFO("[%s] discovered public IP %s for instance\n", instance->instanceId, ip);
-                    euca_strncpy(instance->ncnet.publicIp, ip, 24);
+                    euca_strncpy(instance->ncnet.publicIp, ip, IP_BUFFER_SIZE);
                     EUCA_FREE(ip);
                 }
             }
         }
 
-        if (!strncmp(instance->ncnet.privateIp, "0.0.0.0", 24)) {
+        if (!strncmp(instance->ncnet.privateIp, "0.0.0.0", IP_BUFFER_SIZE)) {
             rc = mac2ip(nc_state.vnetconfig, instance->ncnet.privateMac, &ip);
             if (!rc && ip) {
                 LOGINFO("[%s] discovered private IP %s for instance\n", instance->instanceId, ip);
-                euca_strncpy(instance->ncnet.privateIp, ip, 24);
+                euca_strncpy(instance->ncnet.privateIp, ip, IP_BUFFER_SIZE);
                 EUCA_FREE(ip);
             }
         }
@@ -1245,12 +1249,12 @@ void *monitoring_thread(void *arg)
     int destroy_files = 0;
     u32 ipHex = 0;
     FILE *FP = NULL;
-    char nfile[MAX_PATH] = "";
-    char nfilefinal[MAX_PATH] = "";
-    char URL[MAX_PATH] = "";
-    char ccHost[MAX_PATH] = "";
-    char clcHost[MAX_PATH] = "";
-    char tmpbuf[MAX_PATH] = "";
+    char nfile[EUCA_MAX_PATH] = "";
+    char nfilefinal[EUCA_MAX_PATH] = "";
+    char URL[EUCA_MAX_PATH] = "";
+    char ccHost[EUCA_MAX_PATH] = "";
+    char clcHost[EUCA_MAX_PATH] = "";
+    char tmpbuf[EUCA_MAX_PATH] = "";
     long long iteration = 0;
     long long work_fs_size_mb = 0;
     long long work_fs_avail_mb = 0;
@@ -1276,8 +1280,8 @@ void *monitoring_thread(void *arg)
 
         sem_p(inst_sem);
 
-        snprintf(nfile, MAX_PATH, EUCALYPTUS_LOG_DIR "/local-net.stage", nc_state.home);
-        snprintf(nfilefinal, MAX_PATH, EUCALYPTUS_LOG_DIR "/local-net", nc_state.home);
+        snprintf(nfile, EUCA_MAX_PATH, EUCALYPTUS_LOG_DIR "/local-net.stage", nc_state.home);
+        snprintf(nfilefinal, EUCA_MAX_PATH, EUCALYPTUS_LOG_DIR "/local-net", nc_state.home);
         if ((FP = fopen(nfile, "w")) == NULL) {
             LOGWARN("could not open file %s for writing\n", nfile);
         } else {
@@ -1290,7 +1294,7 @@ void *monitoring_thread(void *arg)
                         memcpy(URL, nc_state.services[i].uris[0], 512);
                         if (strlen(URL)) {
                             if (tokenize_uri(URL, tmpbuf, ccHost, &tmpint, tmpbuf)) {
-                                snprintf(ccHost, MAX_PATH, "0.0.0.0");
+                                snprintf(ccHost, EUCA_MAX_PATH, "0.0.0.0");
                             }
                         }
                     }
@@ -1299,7 +1303,7 @@ void *monitoring_thread(void *arg)
                         memcpy(URL, nc_state.services[i].uris[0], 512);
                         if (strlen(URL)) {
                             if (tokenize_uri(URL, tmpbuf, clcHost, &tmpint, tmpbuf)) {
-                                snprintf(clcHost, MAX_PATH, "0.0.0.0");
+                                snprintf(clcHost, EUCA_MAX_PATH, "0.0.0.0");
                             }
                         }
                     }
@@ -1942,7 +1946,7 @@ static int init(void)
 
     static int initialized = 0;
     int do_warn = 0, i;
-    char logFile[MAX_PATH] = "";
+    char logFile[EUCA_MAX_PATH] = "";
     char *bridge = NULL;
     char *s = NULL;
     char *tmp = NULL;
@@ -1988,29 +1992,29 @@ static int init(void)
         nc_state.home[0] = '\0';       // empty string means '/'
         do_warn = 1;
     } else {
-        strncpy(nc_state.home, tmp, MAX_PATH - 1);
+        strncpy(nc_state.home, tmp, EUCA_MAX_PATH - 1);
     }
 
     //Set the SC client policy file path
-    char policyFile[MAX_PATH];
-    bzero(policyFile, MAX_PATH);
-    snprintf(policyFile, MAX_PATH, EUCALYPTUS_KEYS_DIR "/sc-client-policy.xml", nc_state.home);
-    euca_strncpy(nc_state.config_sc_policy_file, policyFile, MAX_PATH);
+    char policyFile[EUCA_MAX_PATH];
+    bzero(policyFile, EUCA_MAX_PATH);
+    snprintf(policyFile, EUCA_MAX_PATH, EUCALYPTUS_KEYS_DIR "/sc-client-policy.xml", nc_state.home);
+    euca_strncpy(nc_state.config_sc_policy_file, policyFile, EUCA_MAX_PATH);
 
     // set the minimum log for now
-    snprintf(logFile, MAX_PATH, EUCALYPTUS_LOG_DIR "/nc.log", nc_state.home);
+    snprintf(logFile, EUCA_MAX_PATH, EUCALYPTUS_LOG_DIR "/nc.log", nc_state.home);
     log_file_set(logFile);
     LOGINFO("spawning Eucalyptus node controller v%s %s\n", nc_state.version, compile_timestamp_str);
     if (do_warn)
         LOGWARN("env variable %s not set, using /\n", EUCALYPTUS_ENV_VAR_NAME);
 
     // search for the config file
-    snprintf(nc_state.configFiles[1], MAX_PATH, EUCALYPTUS_CONF_LOCATION, nc_state.home);
+    snprintf(nc_state.configFiles[1], EUCA_MAX_PATH, EUCALYPTUS_CONF_LOCATION, nc_state.home);
     if (stat(nc_state.configFiles[1], &mystat)) {
         LOGFATAL("could not open configuration file %s\n", nc_state.configFiles[1]);
         return (EUCA_ERROR);
     }
-    snprintf(nc_state.configFiles[0], MAX_PATH, EUCALYPTUS_CONF_OVERRIDE_LOCATION, nc_state.home);
+    snprintf(nc_state.configFiles[0], EUCA_MAX_PATH, EUCALYPTUS_CONF_OVERRIDE_LOCATION, nc_state.home);
     LOGINFO("NC is looking for configuration in %s,%s\n", nc_state.configFiles[1], nc_state.configFiles[0]);
 
     configInitValues(configKeysRestartNC, configKeysNoRestartNC);   // initialize config subsystem
@@ -2022,8 +2026,8 @@ static int init(void)
     nc_state.xm_cmd_path[0] = '\0';
     nc_state.virsh_cmd_path[0] = '\0';
     nc_state.get_info_cmd_path[0] = '\0';
-    snprintf(nc_state.libvirt_xslt_path, MAX_PATH, EUCALYPTUS_LIBVIRT_XSLT, nc_state.home); // for now, this must be set before anything in xml.c is invoked
-    snprintf(nc_state.rootwrap_cmd_path, MAX_PATH, EUCALYPTUS_ROOTWRAP, nc_state.home);
+    snprintf(nc_state.libvirt_xslt_path, EUCA_MAX_PATH, EUCALYPTUS_LIBVIRT_XSLT, nc_state.home);    // for now, this must be set before anything in xml.c is invoked
+    snprintf(nc_state.rootwrap_cmd_path, EUCA_MAX_PATH, EUCALYPTUS_ROOTWRAP, nc_state.home);
 
     {                                  // determine the hypervisor to use
         char *hypervisor = getConfString(nc_state.configFiles, 2, CONFIG_HYPERVISOR);
@@ -2116,7 +2120,7 @@ static int init(void)
          * required file depends on the process owner's home directory, which
          * may change after the initial installation.
          */
-        char libVirtConf[MAX_PATH];
+        char libVirtConf[EUCA_MAX_PATH];
         uid_t uid = geteuid();
         struct passwd *pw;
         FILE *fd;
@@ -2124,7 +2128,7 @@ static int init(void)
         pw = getpwuid(uid);
         errno = 0;
         if (pw != NULL) {
-            snprintf(libVirtConf, MAX_PATH, "%s/.libvirt/libvirtd.conf", pw->pw_dir);
+            snprintf(libVirtConf, EUCA_MAX_PATH, "%s/.libvirt/libvirtd.conf", pw->pw_dir);
             if (access(libVirtConf, R_OK) == -1 && errno == ENOENT) {
                 libVirtConf[strlen(libVirtConf) - strlen("/libvirtd.conf")] = '\0';
                 errno = 0;
@@ -2150,7 +2154,7 @@ static int init(void)
     }
 
     {                                  // initialize hooks if their directory looks ok
-        char dir[MAX_PATH];
+        char dir[EUCA_MAX_PATH];
         snprintf(dir, sizeof(dir), EUCALYPTUS_NC_HOOKS_DIR, nc_state.home);
         // if 'dir' does not exist, init_hooks() will silently fail,
         // and all future call_hooks() will silently succeed
@@ -2183,7 +2187,7 @@ static int init(void)
     int max_attempts;
     GET_VAR_INT(max_attempts, CONFIG_WALRUS_DOWNLOAD_MAX_ATTEMPTS, -1);
     if (max_attempts > 0 && max_attempts < 99)
-        walrus_set_max_download_attempts(max_attempts);
+        objectstorage_set_max_download_attempts(max_attempts);
 
     // add three eucalyptus directories with executables to PATH of this process
     add_euca_to_path(nc_state.home);
@@ -2195,7 +2199,12 @@ static int init(void)
     }
     // check on dependencies (3rd-party programs that NC invokes)
     if (diskutil_init(FALSE)) {        // NC does not need GRUB for now
-        LOGFATAL("failed to find all required dependencies\n");
+        LOGFATAL("failed to find required dependencies for disk operations\n");
+        return (EUCA_FATAL_ERROR);
+    }
+    // check on the Imaging Toolkit readyness
+    if (imaging_init(nc_state.home)) {
+        LOGFATAL("failed to find required dependencies for image work\n");
         return (EUCA_FATAL_ERROR);
     }
 
@@ -2311,14 +2320,14 @@ static int init(void)
             return (EUCA_FATAL_ERROR);
         }
         // create work and cache sub-directories so that stat_backing_store() below succeeds
-        char cache_path[MAX_PATH];
+        char cache_path[EUCA_MAX_PATH];
         snprintf(cache_path, sizeof(cache_path), "%s/cache", instances_path);
         if (ensure_directories_exist(cache_path, 0, NULL, NULL, BACKING_DIRECTORY_PERM) == -1) {
             EUCA_FREE(instances_path);
             return (EUCA_ERROR);
         }
 
-        char work_path[MAX_PATH];
+        char work_path[EUCA_MAX_PATH];
         snprintf(work_path, sizeof(work_path), "%s/work", instances_path);
         if (ensure_directories_exist(work_path, 0, NULL, NULL, BACKING_DIRECTORY_PERM) == -1) {
             EUCA_FREE(instances_path);
@@ -2486,7 +2495,7 @@ static int init(void)
         return (EUCA_FATAL_ERROR);
     }
     // setup the network
-    snprintf(nc_state.config_network_path, MAX_PATH, NC_NET_PATH_DEFAULT, nc_state.home);
+    snprintf(nc_state.config_network_path, EUCA_MAX_PATH, NC_NET_PATH_DEFAULT, nc_state.home);
 
     tmp = getConfString(nc_state.configFiles, 2, "VNET_MODE");
     if (!tmp) {
@@ -2513,7 +2522,7 @@ static int init(void)
     if (tmp && (!strcmp(tmp, NETMODE_SYSTEM) || !strcmp(tmp, NETMODE_STATIC) || !strcmp(tmp, NETMODE_MANAGED_NOVLAN) || !strcmp(tmp, NETMODE_EDGE))) {
         bridge = getConfString(nc_state.configFiles, 2, "VNET_BRIDGE");
         if (!bridge) {
-            LOGFATAL("in 'SYSTEM', 'STATIC' or 'MANAGED-NOVLAN' network mode, you must specify a value for VNET_BRIDGE\n");
+            LOGFATAL("in 'SYSTEM', 'STATIC', 'EDGE', or 'MANAGED-NOVLAN' network mode, you must specify a value for VNET_BRIDGE\n");
             initFail = 1;
         }
     }
@@ -2548,28 +2557,28 @@ static int init(void)
     // set NC helper path
     tmp = getConfString(nc_state.configFiles, 2, CONFIG_NC_BUNDLE_UPLOAD);
     if (tmp) {
-        snprintf(nc_state.ncBundleUploadCmd, MAX_PATH, "%s", tmp);
+        snprintf(nc_state.ncBundleUploadCmd, EUCA_MAX_PATH, "%s", tmp);
         EUCA_FREE(tmp);
     } else {
-        snprintf(nc_state.ncBundleUploadCmd, MAX_PATH, "%s", EUCALYPTUS_NC_BUNDLE_UPLOAD);  // default value
+        snprintf(nc_state.ncBundleUploadCmd, EUCA_MAX_PATH, "%s", EUCALYPTUS_NC_BUNDLE_UPLOAD); // default value
     }
 
     // set NC helper path
     tmp = getConfString(nc_state.configFiles, 2, CONFIG_NC_CHECK_BUCKET);
     if (tmp) {
-        snprintf(nc_state.ncCheckBucketCmd, MAX_PATH, "%s", tmp);
+        snprintf(nc_state.ncCheckBucketCmd, EUCA_MAX_PATH, "%s", tmp);
         EUCA_FREE(tmp);
     } else {
-        snprintf(nc_state.ncCheckBucketCmd, MAX_PATH, "%s", EUCALYPTUS_NC_CHECK_BUCKET);    // default value
+        snprintf(nc_state.ncCheckBucketCmd, EUCA_MAX_PATH, "%s", EUCALYPTUS_NC_CHECK_BUCKET);   // default value
     }
 
     // set NC helper path
     tmp = getConfString(nc_state.configFiles, 2, CONFIG_NC_DELETE_BUNDLE);
     if (tmp) {
-        snprintf(nc_state.ncDeleteBundleCmd, MAX_PATH, "%s", tmp);
+        snprintf(nc_state.ncDeleteBundleCmd, EUCA_MAX_PATH, "%s", tmp);
         EUCA_FREE(tmp);
     } else {
-        snprintf(nc_state.ncDeleteBundleCmd, MAX_PATH, "%s", EUCALYPTUS_NC_DELETE_BUNDLE);  // default value
+        snprintf(nc_state.ncDeleteBundleCmd, EUCA_MAX_PATH, "%s", EUCALYPTUS_NC_DELETE_BUNDLE); // default value
     }
 
     {
@@ -2589,8 +2598,8 @@ static int init(void)
 
     {                                  // find and set iqn
         snprintf(nc_state.iqn, CHAR_BUFFER_SIZE, "UNSET");
-        char *ptr = NULL, *iqn = NULL, *tmp = NULL, cmd[MAX_PATH];
-        snprintf(cmd, MAX_PATH, "%s cat /etc/iscsi/initiatorname.iscsi", nc_state.rootwrap_cmd_path);
+        char *ptr = NULL, *iqn = NULL, *tmp = NULL, cmd[EUCA_MAX_PATH];
+        snprintf(cmd, EUCA_MAX_PATH, "%s cat /etc/iscsi/initiatorname.iscsi", nc_state.rootwrap_cmd_path);
         ptr = system_output(cmd);
         if (ptr) {
             iqn = strstr(ptr, "InitiatorName=");
@@ -2622,7 +2631,7 @@ static int init(void)
         struct in_addr **addr_list = (struct in_addr **)he->h_addr_list;
         for (int i = 0; !found && addr_list[i] != NULL; i++) {
             if (!found) {
-                strncpy(nc_state.ip, inet_ntoa(*addr_list[i]), sizeof(nc_state.ip));
+                euca_strncpy(nc_state.ip, inet_ntoa(*addr_list[i]), sizeof(nc_state.ip));
                 found = 1;
             }
         }
@@ -2843,6 +2852,32 @@ int doDescribeInstances(ncMetadata * pMeta, char **instIds, int instIdsLen, ncIn
 }
 
 //!
+//! Handles the broadcast network info request
+//!
+//! @param[in] pMeta a pointer to the node controller (NC) metadata structure
+//! @param[in] networkInfo is a string
+//!
+//! @return EUCA_ERROR on failure or the result of the proper doBroadcastNetworkInfo() handler call.
+//!
+int doBroadcastNetworkInfo(ncMetadata * pMeta, char *networkInfo)
+{
+    int ret = EUCA_OK;
+
+    if (init())
+        return (EUCA_ERROR);
+
+    LOGDEBUG("invoked\n");
+    LOGTRACE("invoked with networkInfo='%s'\n", SP(networkInfo));
+
+    if (nc_state.H->doBroadcastNetworkInfo)
+        ret = nc_state.H->doBroadcastNetworkInfo(&nc_state, pMeta, networkInfo);
+    else
+        ret = nc_state.D->doBroadcastNetworkInfo(&nc_state, pMeta, networkInfo);
+
+    return ret;
+}
+
+//!
 //! Handles the assign address request
 //!
 //! @param[in] pMeta a pointer to the node controller (NC) metadata structure
@@ -2922,7 +2957,8 @@ int doPowerDown(ncMetadata * pMeta)
 //!
 int doRunInstance(ncMetadata * pMeta, char *uuid, char *instanceId, char *reservationId, virtualMachine * params, char *imageId, char *imageURL,
                   char *kernelId, char *kernelURL, char *ramdiskId, char *ramdiskURL, char *ownerId, char *accountId, char *keyName,
-                  netConfig * netparams, char *userData, char *launchIndex, char *platform, int expiryTime, char **groupNames, int groupNamesSize, ncInstance ** outInst)
+                  netConfig * netparams, char *userData, char *credential, char *launchIndex, char *platform, int expiryTime, char **groupNames, int groupNamesSize,
+                  ncInstance ** outInst)
 {
     int ret = EUCA_OK;
 
@@ -2934,15 +2970,22 @@ int doRunInstance(ncMetadata * pMeta, char *uuid, char *instanceId, char *reserv
             params->mem, netparams->vlan, netparams->networkIndex, netparams->privateMac, netparams->privateIp, platform, kernelId, ramdiskId);
     if (vbr_legacy(instanceId, params, imageId, imageURL, kernelId, kernelURL, ramdiskId, ramdiskURL) != EUCA_OK)
         return (EUCA_ERROR);
-    // spark: kernel and ramdisk id are required for linux bundle-instance, but are not in the runInstance request; 
+    // spark: kernel and ramdisk id are required for linux bundle-instance, but are not in the runInstance request;
     if (!kernelId || !ramdiskId) {
         for (int i = 0; i < EUCA_MAX_VBRS && i < params->virtualBootRecordLen; i++) {
             virtualBootRecord *vbr = &(params->virtualBootRecord[i]);
             if (strlen(vbr->resourceLocation) > 0) {
-                if (!strcmp(vbr->typeName, "kernel"))
+                if (!strcmp(vbr->typeName, "kernel")) {
+                    // free our string if it was previously set
+                    EUCA_FREE(kernelId);
                     kernelId = strdup(vbr->id);
-                if (!strcmp(vbr->typeName, "ramdisk"))
+                }
+
+                if (!strcmp(vbr->typeName, "ramdisk")) {
+                    // free our string if it was previously set
+                    EUCA_FREE(ramdiskId);
                     ramdiskId = strdup(vbr->id);
+                }
             } else {
                 break;
             }
@@ -2951,10 +2994,12 @@ int doRunInstance(ncMetadata * pMeta, char *uuid, char *instanceId, char *reserv
 
     if (nc_state.H->doRunInstance) {
         ret = nc_state.H->doRunInstance(&nc_state, pMeta, uuid, instanceId, reservationId, params, imageId, imageURL, kernelId, kernelURL, ramdiskId,
-                                        ramdiskURL, ownerId, accountId, keyName, netparams, userData, launchIndex, platform, expiryTime, groupNames, groupNamesSize, outInst);
+                                        ramdiskURL, ownerId, accountId, keyName, netparams, userData, credential, launchIndex, platform, expiryTime, groupNames, groupNamesSize,
+                                        outInst);
     } else {
         ret = nc_state.D->doRunInstance(&nc_state, pMeta, uuid, instanceId, reservationId, params, imageId, imageURL, kernelId, kernelURL, ramdiskId,
-                                        ramdiskURL, ownerId, accountId, keyName, netparams, userData, launchIndex, platform, expiryTime, groupNames, groupNamesSize, outInst);
+                                        ramdiskURL, ownerId, accountId, keyName, netparams, userData, credential, launchIndex, platform, expiryTime, groupNames, groupNamesSize,
+                                        outInst);
     }
 
     return ret;
@@ -3163,14 +3208,14 @@ int doDetachVolume(ncMetadata * pMeta, char *instanceId, char *volumeId, char *a
 //! @param[in] instanceId the instance identifier string (i-XXXXXXXX)
 //! @param[in] bucketName the bucket name string to which the bundle will be saved
 //! @param[in] filePrefix the prefix name string of the bundle
-//! @param[in] walrusURL the walrus URL address string
+//! @param[in] objectStorageURL the objectstorage URL address string
 //! @param[in] userPublicKey the public key string
 //! @param[in] S3Policy the S3 engine policy
 //! @param[in] S3PolicySig the S3 engine policy signature
 //!
 //! @return EUCA_ERROR on failure or the result of the proper doBundleInstance() handler call.
 //!
-int doBundleInstance(ncMetadata * pMeta, char *instanceId, char *bucketName, char *filePrefix, char *walrusURL, char *userPublicKey, char *S3Policy, char *S3PolicySig)
+int doBundleInstance(ncMetadata * pMeta, char *instanceId, char *bucketName, char *filePrefix, char *objectStorageURL, char *userPublicKey, char *S3Policy, char *S3PolicySig)
 {
     int ret = EUCA_OK;
 
@@ -3179,13 +3224,13 @@ int doBundleInstance(ncMetadata * pMeta, char *instanceId, char *bucketName, cha
     DISABLED_CHECK;
 
     LOGINFO("[%s] starting instance bundling into bucket %s\n", instanceId, bucketName);
-    LOGDEBUG("[%s] bundling parameters: bucketName=%s filePrefix=%s walrusURL=%s userPublicKey=%s S3Policy=%s, S3PolicySig=%s\n",
-             instanceId, bucketName, filePrefix, walrusURL, userPublicKey, S3Policy, S3PolicySig);
+    LOGDEBUG("[%s] bundling parameters: bucketName=%s filePrefix=%s objectStorageURL=%s userPublicKey=%s S3Policy=%s, S3PolicySig=%s\n",
+             instanceId, bucketName, filePrefix, objectStorageURL, userPublicKey, S3Policy, S3PolicySig);
 
     if (nc_state.H->doBundleInstance)
-        ret = nc_state.H->doBundleInstance(&nc_state, pMeta, instanceId, bucketName, filePrefix, walrusURL, userPublicKey, S3Policy, S3PolicySig);
+        ret = nc_state.H->doBundleInstance(&nc_state, pMeta, instanceId, bucketName, filePrefix, objectStorageURL, userPublicKey, S3Policy, S3PolicySig);
     else
-        ret = nc_state.D->doBundleInstance(&nc_state, pMeta, instanceId, bucketName, filePrefix, walrusURL, userPublicKey, S3Policy, S3PolicySig);
+        ret = nc_state.D->doBundleInstance(&nc_state, pMeta, instanceId, bucketName, filePrefix, objectStorageURL, userPublicKey, S3Policy, S3PolicySig);
 
     return ret;
 }

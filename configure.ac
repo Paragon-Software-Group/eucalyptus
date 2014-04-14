@@ -52,7 +52,7 @@ LIBS="`getconf LFS64_LIBS` `getconf LFS_LIBS` $LIBS"
 CFLAGS="${CFLAGS} `getconf LFS64_CFLAGS` `getconf LFS_CFLAGS`"
 
 # compile options
-CFLAGS="${CFLAGS} -Wall -Wno-unused-variable -fPIC -DHAVE_CONFIG_H -std=gnu99"
+CFLAGS="${CFLAGS} -Wall -fPIC -DHAVE_CONFIG_H -std=gnu99"
 INCLUDES="${INCLUDES} -I. -I.. -Igenerated -I${TOP}/storage -I${TOP}/node -I${TOP}/util -I${TOP}/net "
 
 # Arguments checking
@@ -289,7 +289,10 @@ AC_CONFIG_FILES([Makedefs
                  tools/eucalyptus-cloud:tools/eucalyptus-cloud.in
                  tools/eucalyptus-nc:tools/eucalyptus-nc.in
                  tools/eucalyptus-logrotate.conf:tools/eucalyptus-logrotate.conf.in
-                 tools/eucalyptus-eucanetd:tools/eucalyptus-eucanetd.in
+                 tools/eucanetd:tools/eucanetd.in
+                 tools/imaging/setup.cfg.template:tools/imaging/setup.cfg.template.in
+                 tools/imaging/eucatoolkit/__init__.py:tools/imaging/eucatoolkit/__init__.py.in
+                 storage/imager/euca-vmdk-wrapper:storage/imager/euca-vmdk-wrapper.in
                  clc/modules/bootstrap/src/main/resources/version.properties:clc/modules/bootstrap/src/main/resources/version.properties.in])
 
 AC_DEFINE_UNQUOTED([EUCA_VERSION], "$EUCA_VERSION", [Version of Eucalyptus])

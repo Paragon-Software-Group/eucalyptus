@@ -166,6 +166,7 @@ static int ncClientBundleRestartInstance(ncStub * pStub, ncMetadata * pMeta, cha
 static int ncClientDescribeBundleTask(ncStub * pStub, ncMetadata * pMeta);
 static int ncClientPowerDown(ncStub * pStub, ncMetadata * pMeta);
 static int ncClientAssignAddress(ncStub * pStub, ncMetadata * pMeta, char *psInstanceId, char *psPublicIP);
+static int ncClientBroadcastNetworkInfo(ncStub * pStub, ncMetadata * pMeta, char *psNetworkInfo);
 static int ncClientDescribeResources(ncStub * pStub, ncMetadata * pMeta);
 static int ncClientAttachVolume(ncStub * pStub, ncMetadata * pMeta, char *psInstanceId, char *psVolumeId, char *psRemoteDevice, char *psLocalDevice);
 static int ncClientDetachVolume(ncStub * pStub, ncMetadata * pMeta, char *psInstanceId, char *psVolumeId, char *psRemoteDevice, char *psLocalDevice, boolean force);
@@ -235,7 +236,7 @@ static void usage(void)
             "\t\t\tsize = {-1|NNNN} - in bytes, only for local partitions\n"
             "\t\t\tformat = {none|ext3|swap} - only for local partitions\n"
             "\t\t\tguestDeviceName = {none|x?[vhsf]d[a-z]?[1-9]*} - e.g., sda1\n"
-            "\t\t\tresourceLocation = {none|walrus://...|iqn://...|aoe://...}\n"
+            "\t\t\tresourceLocation = {none|objectstorage://...|iqn://...|aoe://...}\n"
             "\t\t-m [id:path] \t- id and manifest path of disk image\n"
             "\t\t-k [id:path] \t- id and manifest path of kernel image\n"
             "\t\t-r [id:path] \t- id and manifest path of ramdisk image\n"
@@ -385,6 +386,7 @@ static int ncClientRunInstance(ncStub * pStub, ncMetadata * pMeta, u32 nbInstanc
     char *psPrivateMac = NULL;
     char *psPrivateIP = NULL;
     char *psPlatform = NULL;
+    char *psCredential = NULL;
     char sTempBuffer[64] = "";
     netConfig netParams = { 0 };
     ncInstance *pOutInst = NULL;
@@ -424,8 +426,8 @@ static int ncClientRunInstance(ncStub * pStub, ncMetadata * pMeta, u32 nbInstanc
         snprintf(netParams.privateMac, sizeof(netParams.privateMac), "%s", psPrivateMac);
 
         rc = ncRunInstanceStub(pStub, pMeta, psLocalUUID, psLocalInstanceId, psLocalReservationId, pVirtMachine, psImageId, psImageURL, psKernelId, psKernelURL, psRamdiskId,
-                               psRamdiskURL, "eucalyptusUser", "eucalyptusAccount", "", &netParams, psUserData, psLaunchIndex, psPlatform, 0, ppsGroupNames, groupNameSize,
-                               &pOutInst);
+                               psRamdiskURL, "eucalyptusUser", "eucalyptusAccount", "", &netParams, psUserData, psCredential, psLaunchIndex, psPlatform, 0, ppsGroupNames,
+                               groupNameSize, &pOutInst);
         if (rc != EUCA_OK) {
             printf("ncRunInstanceStub = %d : instanceId=%s\n", rc, psInstanceId);
             exit(1);
@@ -438,8 +440,11 @@ static int ncClientRunInstance(ncStub * pStub, ncMetadata * pMeta, u32 nbInstanc
 
         printf("ncRunInstanceStub = %d : instanceId=%s stateCode=%d stateName=%s deviceMappings=%d/%d\n", rc, pOutInst->instanceId, pOutInst->stateCode, pOutInst->stateName,
                devMapId, pOutInst->params.virtualBootRecordLen);
+        EUCA_FREE(pOutInst);
     }
 
+    EUCA_FREE(psPrivateIP);
+    EUCA_FREE(psPrivateMac);
     return (EUCA_OK);
 }
 
@@ -632,8 +637,10 @@ static int ncClientDescribeBundleTask(ncStub * pStub, ncMetadata * pMeta)
     printf("ncDescribeBundleTasksStub = %d\n", rc);
     for (int i = 0; i < outBundleTasksLen; i++) {
         printf("\tBUNDLE %d: %s %s\n", i, ppOutBundleTasks[i]->instanceId, ppOutBundleTasks[i]->state);
+        EUCA_FREE(ppOutBundleTasks[i]);
     }
 
+    EUCA_FREE(ppOutBundleTasks);
     return (rc);
 }
 
@@ -658,6 +665,33 @@ static int ncClientPowerDown(ncStub * pStub, ncMetadata * pMeta)
     int rc = EUCA_OK;
     rc = ncPowerDownStub(pStub, pMeta);
     printf("ncPowerDownStub = %d\n", rc);
+    return (rc);
+}
+
+//!
+//! Builds and execute the "BroadcastNetworkInfo" request
+//!
+//! @param[in]  pStub a pointer to the NC stub structure
+//! @param[in]  pMeta a pointer to the node controller (NC) metadata structure
+///! @param[in]  psNetworkInfo a pointer to the string that is a file that will be read and sent as input to broadcastnetworkinfo()
+//!
+//! @return EUCA_OK on success. On failure, the program will terminate
+//!
+//! @see
+//!
+//! @pre None of the provided pointers should be NULL
+//!
+//! @post The request is sent to the NC client and the result of the request will be displayed.
+//!
+//! @note
+//!
+static int ncClientBroadcastNetworkInfo(ncStub * pStub, ncMetadata * pMeta, char *psNetworkInfo)
+{
+    char *networkInfoBuf = NULL;
+    int rc = EUCA_OK;
+    networkInfoBuf = file2str(psNetworkInfo);
+    rc = ncBroadcastNetworkInfoStub(pStub, pMeta, networkInfoBuf);
+    printf("ncBroadcastNetworkInfoStub = %d, %s\n", rc, networkInfoBuf);
     return (rc);
 }
 
@@ -879,9 +913,9 @@ static int ncClientMigrateInstance(ncStub * pStub, ncMetadata * pMeta, char *psI
 
     bzero(&instance, sizeof(instance));
 
-    strncpy(instance.instanceId, psInstanceId, sizeof(instance.instanceId));
-    strncpy(instance.migration_src, psSrcNodeName, sizeof(instance.migration_src));
-    strncpy(instance.migration_dst, psDstNodeName, sizeof(instance.migration_dst));
+    euca_strncpy(instance.instanceId, psInstanceId, sizeof(instance.instanceId));
+    euca_strncpy(instance.migration_src, psSrcNodeName, sizeof(instance.migration_src));
+    euca_strncpy(instance.migration_dst, psDstNodeName, sizeof(instance.migration_dst));
     if ((rc = ncMigrateInstancesStub(pStub, pMeta, &pInstance, 1, psStateName, psMigrationCreds)) != EUCA_OK) {
         printf("ncMigrateInstancesStub = %d\n", rc);
         exit(1);
@@ -1008,6 +1042,7 @@ int main(int argc, char *argv[])
     char *psUUID = NULL;
     char *psMacAddr = strdup(DEFAULT_MAC_ADDR);
     char *psPublicIP = strdup(DEFAULT_PUBLIC_IP);
+    char *psNetworkInfo = NULL;
     char *psVolumeId = NULL;
     char *psRemoteDevice = NULL;
     char *psLocalDevice = NULL;
@@ -1026,7 +1061,7 @@ int main(int argc, char *argv[])
     char sNcURL[BUFSIZE] = "";
     char sWsURL[BUFSIZE] = "";
     char sTemp[BUFSIZE] = "";
-    char sLogFile[MAX_PATH] = "";
+    char sLogFile[EUCA_MAX_PATH] = "";
     boolean force = FALSE;
     boolean local = FALSE;
     ncStub *pStub = NULL;
@@ -1034,7 +1069,7 @@ int main(int argc, char *argv[])
     serviceInfoType *pServInfo = NULL;
     virtualMachine virtMachine = { 64, 1, 1, "m1.small", NULL, NULL, NULL, NULL, NULL, NULL, {}, 0 };
 
-    while ((ch = getopt(argc, argv, "lhdn:w:i:m:k:r:e:a:c:h:u:p:V:R:L:FU:I:G:v:t:s:M:B")) != -1) {
+    while ((ch = getopt(argc, argv, "lhdN:n:w:i:m:k:r:e:a:c:h:u:p:V:R:L:FU:I:G:v:t:s:M:B")) != -1) {
         switch (ch) {
         case 'c':
             nbInstances = atoi(optarg);
@@ -1056,6 +1091,9 @@ int main(int argc, char *argv[])
             break;
         case 'p':
             psPublicIP = optarg;
+            break;
+        case 'N':
+            psNetworkInfo = optarg;
             break;
         case 'm':
             psImageId = strtok(optarg, ":");
@@ -1194,9 +1232,9 @@ int main(int argc, char *argv[])
         printf("connecting to NC at %s\n", sNcURL);
 
     if ((psEucaHome = getenv(EUCALYPTUS_ENV_VAR_NAME)) == NULL) {
-        snprintf(sLogFile, MAX_PATH, EUCALYPTUS_LOG_DIR "/NCclient.log", "/");
+        snprintf(sLogFile, EUCA_MAX_PATH, EUCALYPTUS_LOG_DIR "/NCclient.log", "/");
     } else {
-        snprintf(sLogFile, MAX_PATH, EUCALYPTUS_LOG_DIR "/NCclient.log", psEucaHome);
+        snprintf(sLogFile, EUCA_MAX_PATH, EUCALYPTUS_LOG_DIR "/NCclient.log", psEucaHome);
     }
 
     if ((pStub = ncStubCreate(sNcURL, sLogFile, NULL)) == NULL) {
@@ -1216,8 +1254,8 @@ int main(int argc, char *argv[])
 
     snprintf(sWsURL, sizeof(sWsURL), "http://%s%s", psWsHostPort, WALRUS_ENDPOINT);
     pServInfo = &(meta.services[meta.servicesLen++]);
-    euca_strncpy(pServInfo->type, "walrus", sizeof(pServInfo->type));
-    euca_strncpy(pServInfo->name, "walrus", sizeof(pServInfo->name));
+    euca_strncpy(pServInfo->type, "objectstorage", sizeof(pServInfo->type));
+    euca_strncpy(pServInfo->name, "objectstorage", sizeof(pServInfo->name));
     euca_strncpy(pServInfo->uris[0], sWsURL, sizeof(pServInfo->uris[0]));
     pServInfo->urisLen = 1;
 
@@ -1257,6 +1295,8 @@ int main(int argc, char *argv[])
         ncClientPowerDown(pStub, &meta);
     } else if (!strcmp(psCommand, "describeBundleTasks")) {
         ncClientDescribeBundleTask(pStub, &meta);
+    } else if (!strcmp(psCommand, "broadcastNetworkInfo")) {
+        ncClientBroadcastNetworkInfo(pStub, &meta, psNetworkInfo);
     } else if (!strcmp(psCommand, "assignAddress")) {
         ncClientAssignAddress(pStub, &meta, psInstanceId, psPublicIP);
     } else if (!strcmp(psCommand, "terminateInstance")) {
