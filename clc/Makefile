@@ -144,6 +144,9 @@ ifeq ($(DISABLEGIT), 0)
 		echo "lib is not a git repository so ignoring; good luck!" >&2; \
 	else \
 		git clone --depth=1 -b $(CLOUD_LIBS_BRANCH) git://github.com/eucalyptus/eucalyptus-cloud-libs.git lib; \
+		cd lib/; \
+		git checkout 2a1ed3dc59f3c8bef375faa6c6591a803a9602d0; \
+		cd -; \
 	fi
 	@# We only want to checkout our git repository once.
 	@# In the case where a user has chosen a custom repository,

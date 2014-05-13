@@ -79,7 +79,7 @@ TEST_VBR_OBJS   = iscsi.o blobstore.o objectstorage.o http.o diskutil.o       ..
 TEST_DISKUTIL_OBJS  =                                            map.o                ../util/log.o ../util/misc.o ../util/euca_string.o ../util/euca_file.o ../util/ipc.o
 
 STORAGE_LIBS    = $(LDFLAGS) -lcurl -lssl -lcrypto -pthread -lpthread
-TESTS           = test_vbr test_blobstore test_ebs test_diskutil
+TESTS           = test_blobstore test_ebs
 #EFENCE          = -lefence
 
 #all: vbr.o backing.o storage-windows.o objectstorage.o diskutil.o map.o Wclient euca-blobs generated/stubs $(SCCLIENT) $(TESTS)
