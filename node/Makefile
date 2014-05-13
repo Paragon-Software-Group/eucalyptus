@@ -92,7 +92,7 @@ all: generated/stubs test_hooks
 
 build: all
 
-buildall: server client clientlib test_misc test_nc test_hooks test_xml test_xml2
+buildall: server client clientlib
 
 generated/stubs: $(NCWSDL) $(SCWSDL) 
 	@echo Generating server stubs
