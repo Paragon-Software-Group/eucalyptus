@@ -24,8 +24,10 @@ import java.text.SimpleDateFormat;
 import java.util.ArrayList;
 import java.util.Calendar;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.TimeZone;
+import java.util.concurrent.TimeUnit;
 
 import javax.crypto.Mac;
 import javax.crypto.spec.SecretKeySpec;
@@ -36,6 +38,8 @@ import com.eucalyptus.auth.Accounts;
 import com.eucalyptus.auth.principal.AccessKey;
 import com.eucalyptus.bootstrap.Bootstrap;
 import com.eucalyptus.component.ComponentId;
+import com.eucalyptus.component.Partition;
+import com.eucalyptus.component.Partitions;
 import com.eucalyptus.component.ServiceConfiguration;
 import com.eucalyptus.component.Topology;
 import com.eucalyptus.component.id.Eucalyptus;
@@ -47,6 +51,7 @@ import com.eucalyptus.entities.TransactionResource;
 import com.eucalyptus.event.ClockTick;
 import com.eucalyptus.event.EventListener;
 import com.eucalyptus.event.Listeners;
+import com.eucalyptus.images.Emis.LookupMachine;
 import com.eucalyptus.imaging.ConvertedImageDetail;
 import com.eucalyptus.imaging.DescribeConversionTasksResponseType;
 import com.eucalyptus.imaging.DescribeConversionTasksType;
@@ -57,6 +62,9 @@ import com.eucalyptus.imaging.ImportDiskImage;
 import com.eucalyptus.imaging.ImportDiskImageDetail;
 import com.eucalyptus.imaging.ImportImageResponseType;
 import com.eucalyptus.imaging.ImportImageType;
+import com.eucalyptus.imaging.manifest.BundleImageManifest;
+import com.eucalyptus.imaging.manifest.DownloadManifestFactory;
+import com.eucalyptus.imaging.manifest.ImageManifestFile;
 import com.eucalyptus.objectstorage.ObjectStorage;
 import com.eucalyptus.objectstorage.msgs.CreateBucketResponseType;
 import com.eucalyptus.objectstorage.msgs.CreateBucketType;
@@ -77,13 +85,28 @@ import com.eucalyptus.util.Exceptions;
 import com.eucalyptus.util.Callback.Checked;
 import com.eucalyptus.util.async.CheckedListenableFuture;
 import com.eucalyptus.util.async.Futures;
+import com.eucalyptus.vm.VmInstance;
+import com.eucalyptus.vm.VmInstances;
+import com.eucalyptus.vm.VmInstance.VmState;
+import com.google.common.base.Function;
+import com.google.common.base.Optional;
 import com.google.common.base.Predicate;
+import com.google.common.cache.CacheBuilder;
+import com.google.common.cache.CacheLoader;
+import com.google.common.cache.LoadingCache;
 import com.google.common.collect.Collections2;
 import com.google.common.collect.Lists;
 import com.google.common.collect.Sets;
+import com.google.common.collect.Maps;
 
 import edu.ucsb.eucalyptus.msgs.BaseMessage;
+import edu.ucsb.eucalyptus.msgs.CreateTagsResponseType;
+import edu.ucsb.eucalyptus.msgs.CreateTagsType;
+import edu.ucsb.eucalyptus.msgs.DeleteResourceTag;
+import edu.ucsb.eucalyptus.msgs.DeleteTagsResponseType;
+import edu.ucsb.eucalyptus.msgs.DeleteTagsType;
 import edu.ucsb.eucalyptus.msgs.EucalyptusMessage;
+import edu.ucsb.eucalyptus.msgs.ResourceTag;
 
 /**
  * @author Sang-Min Park
@@ -98,8 +121,7 @@ public class ImageConversionManager implements EventListener<ClockTick> {
   @Override
   public void fireEvent(ClockTick event) {
     if (!( Bootstrap.isFinished() &&
-         Topology.isEnabled( Eucalyptus.class) && 
-             Topology.isEnabled(Imaging.class) ) )
+         Topology.isEnabledLocally( Eucalyptus.class)  ) )
        return;
     
     /// check the state of emis
@@ -169,6 +191,17 @@ public class ImageConversionManager implements EventListener<ClockTick> {
     }catch(final Exception ex){
       LOG.error("Failed to clean up objects and bucket of deregistered images", ex);
     }
+
+    try{
+      this.updateTags(Lists.transform(partitionedImages, new Function<ImageInfo, String>(){
+        @Override
+        public String apply(ImageInfo arg0) {
+          return arg0.getDisplayName();
+        }
+      }));
+    }catch(final Exception ex){
+      LOG.error("Failed to tag images and instances in conversion", ex);
+    }
   }
   
   public static final String BUCKET_PREFIX = "euca-internal";
@@ -189,42 +222,51 @@ public class ImageConversionManager implements EventListener<ClockTick> {
     }
     
     for(final ImageInfo image: images){
-      if(!(image instanceof MachineImageInfo))
-        continue;
-      final MachineImageInfo machineImage = (MachineImageInfo) image;
-      
-      final String manifestLocation = machineImage.getManifestLocation();
-      final String[] tokens = manifestLocation.split("/");
-      final String bucketName = tokens[0];
-      final String prefix = tokens[1].replace(".manifest.xml", "");
-      
-      String newBucket = null;
-      do{
-        newBucket = String.format("%s-%s-%s", 
-            BUCKET_PREFIX, Crypto.generateAlphanumericId(5, ""), bucketName);
-        if(newBucket.length()>63){
-          newBucket = String.format("%s-%s", BUCKET_PREFIX, Crypto.generateAlphanumericId(8, ""));
-        }
-        newBucket = newBucket.toLowerCase();
-      }while (systemBuckets.contains(newBucket));
-      
       try{
-        final CreateBucketTask task = new CreateBucketTask(newBucket);
-        final CheckedListenableFuture<Boolean> result = task.dispatch();
-        if(result.get()){
+        if(!(image instanceof MachineImageInfo))
+          continue;
+        final MachineImageInfo machineImage = (MachineImageInfo) image;
+
+        final String manifestLocation = machineImage.getManifestLocation();
+        final String[] tokens = manifestLocation.split("/");
+        final String bucketName = tokens[0];
+        final String prefix = tokens[1].replace(".manifest.xml", "");
+
+        String newBucket = null;
+        do{
+          newBucket = String.format("%s-%s-%s", 
+              BUCKET_PREFIX, Crypto.generateAlphanumericId(5, ""), bucketName);
+          if(newBucket.length()>63){
+            newBucket = String.format("%s-%s", BUCKET_PREFIX, Crypto.generateAlphanumericId(8, ""));
+          }
+          newBucket = newBucket.toLowerCase();
+        }while (systemBuckets.contains(newBucket));
+
+        try{
+          final CreateBucketTask task = new CreateBucketTask(newBucket);
+          final CheckedListenableFuture<Boolean> result = task.dispatch();
+          if(result.get()){
+            ;
+          }
+        }catch(final Exception ex){
+          throw new Exception("Failed to create a system-owned bucket for converted image", ex);
+        }
+
+        // set run manifest path
+        final String runManifestPath = String.format("%s/%s.manifest.xml", newBucket, prefix);
+        try{
+          machineImage.setRunManifestLocation(runManifestPath);
+          Images.setRunManifestLocation(machineImage.getDisplayName(), runManifestPath);
+        }catch(final Exception ex){
+          throw new Exception("Failed to update run manifest location");
+        }
+      }catch(final Exception ex){
+        try{
+          Images.setImageState(image.getDisplayName(), ImageMetadata.State.failed);
+        }catch(final Exception ex2){
           ;
         }
-      }catch(final Exception ex){
-        throw new Exception("Failed to create a system-owned bucket for converted image", ex);
-      }
-      
-      // set run manifest path
-      final String runManifestPath = String.format("%s/%s.manifest.xml", newBucket, prefix);
-      try{
-        machineImage.setRunManifestLocation(runManifestPath);
-        Images.setRunManifestLocation(machineImage.getDisplayName(), runManifestPath);
-      }catch(final Exception ex){
-        throw new Exception("Failed to update run manifest location");
+        throw ex;
       }
     }
   }
@@ -251,8 +293,11 @@ public class ImageConversionManager implements EventListener<ClockTick> {
       try{
         final MachineImageInfo machineImage = (MachineImageInfo) image;
         final String runManifestPath = machineImage.getRunManifestLocation();
+        final String manifestPath = machineImage.getManifestLocation();
         
         if(runManifestPath==null || runManifestPath.length()<=0)
+          continue;
+        if(runManifestPath.equals(manifestPath)) // should not delete if runManifest is not system-generated one
           continue;
         
         final String[] tokens = runManifestPath.split("/");
@@ -302,7 +347,7 @@ public class ImageConversionManager implements EventListener<ClockTick> {
        final String kernelId = machineImage.getKernelId();
        final String ramdiskId = machineImage.getRamdiskId();
        if(kernelId==null || ramdiskId ==null)
-         continue;
+         throw new Exception("Kernel and ramdisk are not found for the image");
        
        final KernelImageInfo kernel = Images.lookupKernel(kernelId);
        final RamdiskImageInfo ramdisk = Images.lookupRamdisk(ramdiskId);
@@ -400,8 +445,12 @@ public class ImageConversionManager implements EventListener<ClockTick> {
           }else{
            Images.setImageFormat(machineImage.getDisplayName(), ImageMetadata.ImageFormat.fulldisk);
            /// the service and the backend (NC) rely on virtualizationType=HVM when they prepare full-disk type instances
-           Images.setImageVirtualizationType(machineImage.getDisplayName(), ImageMetadata.VirtualizationType.hvm);
            Images.setImageState(machineImage.getDisplayName(), ImageMetadata.State.available);
+           try{
+             generateDownloadManifests(machineImage.getDisplayName());
+           }catch(final Exception ex){
+             ;
+           }
           }
        }else{
          Images.setImageState(machineImage.getDisplayName(), ImageMetadata.State.failed);
@@ -424,6 +473,31 @@ public class ImageConversionManager implements EventListener<ClockTick> {
         }catch(final Exception ex1){
           ;
         }
+      }
+    }
+  }
+  
+  private void generateDownloadManifests(final String imageId){
+    // lookup all reservations that reference the newly available image id
+    final List<VmInstance> pendingInstances = VmInstances.list(new Predicate<VmInstance>(){
+      @Override
+      public boolean apply(VmInstance arg0) {
+        return imageId.equals(arg0.getBootRecord().getMachineImageId()) && 
+            VmState.PENDING.equals(arg0.getState());
+      }
+    });
+    for(final VmInstance instance : pendingInstances){
+      final String reservationId = instance.getReservationId();
+      final String partitionName = instance.getPartition();
+      final Partition partition = Partitions.lookupByName(partitionName);
+      final MachineImageInfo machineImage = LookupMachine.INSTANCE.apply(imageId);
+      try{
+        final String manifestLocation = DownloadManifestFactory.generateDownloadManifest(
+            new ImageManifestFile(machineImage.getRunManifestLocation(), BundleImageManifest.INSTANCE ), 
+            partition.getNodeCertificate().getPublicKey(), reservationId);
+        LOG.debug(String.format("Generated download manifest for instance %s", instance.getDisplayName()));
+      }catch(final Exception ex){
+        LOG.error(String.format("Failed to generate download manifest for instance %s", instance.getDisplayName()), ex);
       }
     }
   }
@@ -457,6 +531,191 @@ public class ImageConversionManager implements EventListener<ClockTick> {
     return pendingImages;
   }
   
+  private static final LoadingCache<String, Optional<DiskImageConversionTask>> conversionTaskCache =
+      CacheBuilder.newBuilder()
+      .maximumSize(250)
+      .expireAfterWrite(20, TimeUnit.SECONDS)
+      .build( new CacheLoader<String, Optional<DiskImageConversionTask>>(){
+        @Override
+        public Optional<DiskImageConversionTask> load(String taskId)
+            throws Exception {
+          try{
+            final DescribeConversionTasks task = 
+                new DescribeConversionTasks(Lists.newArrayList(taskId));
+            final CheckedListenableFuture<Boolean> result = task.dispatch();
+            if(result.get()){
+              return Optional.of(task.getTasks().get(0));
+            }
+          }catch(final Exception ex){
+            LOG.error("Failed to call describe-conversion-task: "+taskId);
+          }
+          return Optional.absent();
+        }
+      });
+
+  private static Set<String> taggedImages = Sets.newHashSet();
+  private void updateTags(final List<String> images) throws Exception{
+    for(final String imageId : images){
+      try{
+        final ImageInfo image = Images.lookupImage(imageId);
+        final ImageMetadata.State imgState = image.getState();
+        final String taskId = ((MachineImageInfo) image).getImageConversionId();
+        if(ImageMetadata.State.pending_available.equals(imgState)){
+          ; // do nothing for images not yet in conversion
+        }else if (ImageMetadata.State.pending_conversion.equals(imgState)){
+          String message = "";
+          try{
+            Optional<DiskImageConversionTask> task = 
+               conversionTaskCache.get(taskId);
+            if(task.isPresent()){
+              message = task.get().getStatusMessage();
+            }
+          }catch(final Exception ex){
+            ;
+          }
+          // if needed, we can add messages as well; not sure yet if the messages are clear
+          this.tagResources(imageId, "active", message);
+          taggedImages.add(imageId);
+        }else if (ImageMetadata.State.available.equals(imgState) && taggedImages.contains(imageId)){
+          try{
+            this.removeTags(imageId);
+          }catch(final Exception ex){
+            ;
+          }finally{
+            taggedImages.remove(imageId);
+          }
+        }else if (ImageMetadata.State.failed.equals(imgState) && taggedImages.contains(imageId)){
+          String message = "";
+          try{
+            conversionTaskCache.invalidate(taskId);
+            Optional<DiskImageConversionTask> task = 
+               conversionTaskCache.get(taskId);
+            if(task.isPresent())
+              message = task.get().getStatusMessage();
+          }catch(final Exception ex){
+            ;
+          }finally{
+            taggedImages.remove(imageId);
+          }
+          this.tagResources(imageId, "failed", message);
+        }
+      }catch(final Exception ex){
+        LOG.error("Failed to update tags for resources in conversion", ex);
+      }
+    }
+  }
+  
+  final static String TAG_KEY_STATE = "euca:image-conversion-state";
+  final static String TAG_KEY_MESSAGE = "euca:image-conversion-status";
+  final static Map<String, String> tagState = Maps.newHashMap();
+  final static Map<String, String> tagMessage = Maps.newHashMap();
+  
+  private void tagResources(final String imageId, final String state, String statusMessage) throws Exception{
+    final ImageInfo image = Images.lookupImage(imageId);
+    final String imageOwnerId = image.getOwnerUserId();
+    
+    final List<VmInstance> instances = this.lookupInstances(imageId);
+    if(tagState.containsKey(imageId) && state.equals(tagState.get(imageId))){
+      ;
+    }else{
+      resetTag(imageOwnerId, imageId, TAG_KEY_STATE, state);
+      tagState.put(imageId, state);
+    }
+    for(final VmInstance instance : instances){
+      final String instanceId = instance.getInstanceId();
+      final String instanceOwnerId = instance.getOwnerUserId();
+      if(tagState.containsKey(instanceId) && state.equals(tagState.get(instanceId))){
+        ;
+      }else{
+        resetTag(instanceOwnerId, instanceId, TAG_KEY_STATE, state);
+        tagState.put(instanceId, state);
+      }
+    }
+    
+    if(statusMessage == null)
+      statusMessage = "";
+    
+    if(tagMessage.containsKey(imageId) && statusMessage.equals(tagMessage.get(imageId))){
+      ;
+    }else{
+      resetTag(imageOwnerId, imageId, TAG_KEY_MESSAGE, statusMessage);
+      tagMessage.put(imageId, statusMessage);
+    }
+    for(final VmInstance instance : instances){
+      final String instanceId = instance.getInstanceId();
+      final String instanceOwnerId = instance.getOwnerUserId();
+      if(tagMessage.containsKey(instanceId) && statusMessage.equals(tagMessage.get(instanceId))){
+        ;
+      }else{
+        resetTag(instanceOwnerId, instanceId, TAG_KEY_MESSAGE, statusMessage);
+        tagMessage.put(instanceId, statusMessage);
+      }
+    }
+  }
+  
+  private void resetTag(final String userId, final String resourceId, final String tagKey, final String tagValue) throws Exception{
+    /// try deleting tags
+    try{
+      final DeleteTagsTask task = new DeleteTagsTask(userId, Lists.newArrayList(resourceId), Lists.newArrayList(tagKey));
+      final CheckedListenableFuture<Boolean> result = task.dispatch();
+      if(result.get()){
+        ;
+      }
+    }catch(final Exception ex){
+      ;
+    }
+    // create tag
+    final Map<String,String> tag = Maps.newHashMap();
+    tag.put(tagKey, tagValue);
+    final CreateTagsTask task = new CreateTagsTask(userId, Lists.newArrayList(resourceId), tag);
+    final CheckedListenableFuture<Boolean> result = task.dispatch();
+    if(result.get()){
+      ;
+    }else
+      throw new Exception(String.format("Failed to create tag (%s-%s:%s)", resourceId, tagKey,tagValue));
+  }
+  
+  private void removeTags(final String imageId) throws Exception{
+    final ImageInfo image = Images.lookupImage(imageId);
+    final String imageOwnerId = image.getOwnerUserId();
+    
+    DeleteTagsTask task = new DeleteTagsTask(imageOwnerId, Lists.newArrayList(image.getDisplayName()), 
+        Lists.newArrayList(TAG_KEY_STATE, TAG_KEY_MESSAGE));
+    CheckedListenableFuture<Boolean> result = task.dispatch();
+    if(result.get()){
+      ;
+    }
+    final List<VmInstance> instances = this.lookupInstances(imageId);
+    for(final VmInstance instance : instances){
+      final String instanceId = instance.getInstanceId();
+      final String instanceOwnerId = instance.getOwnerUserId();
+      try{
+        task = new DeleteTagsTask(instanceOwnerId, Lists.newArrayList(instanceId), 
+            Lists.newArrayList(TAG_KEY_STATE, TAG_KEY_MESSAGE));
+        result = task.dispatch();
+        if(result.get()){
+          ;
+        }
+      }catch(final Exception ex){
+        ;
+      }
+    }
+  }
+  
+  private List<VmInstance> lookupInstances(final String imageId){
+    try{
+      final List<VmInstance> instances = VmInstances.list(new Predicate<VmInstance>(){
+        @Override
+        public boolean apply(VmInstance arg0) {
+          return imageId.equals(arg0.getBootRecord().getMachineImageId());
+        }
+      });
+      return instances;
+    }catch(final Exception ex){
+      return Lists.newArrayList();
+    }
+  }
+    
   private class DeleteBucketTask extends ObjectStorageActivityTask {
     private String bucketName = null;
     private DeleteBucketTask(final String bucketName){
@@ -598,7 +857,7 @@ public class ImageConversionManager implements EventListener<ClockTick> {
     }
   }
   
-  class DescribeConversionTasks extends ImagingSystemActivityTask {
+  private static class DescribeConversionTasks extends ImagingSystemActivityTask {
     private List<String> taskIds = null;
     private List<DiskImageConversionTask> tasks = null;
     private DescribeConversionTasks(final List<String> taskIds){
@@ -694,7 +953,7 @@ public class ImageConversionManager implements EventListener<ClockTick> {
         final String expiration = sdf.format(c.getTime());
         // based on http://docs.aws.amazon.com/AWSEC2/latest/APIReference/ApiReference-query-BundleInstance.html
         final String policy = String.format("{\"expiration\":\"%s\",\"conditions\":[{\"bucket\": \"%s\"},"
-            + "[\"starts-with\", \"$key\", \"%s\"],{\"acl\":\"ec2-bundle-read\"}]}",
+            + "[\"starts-with\", \"$key\", \"%s\"],{\"acl\":\"aws-exec-read\"}]}",
             expiration, bucket, prefix);
         this.importDisk.setUploadPolicy(B64.standard.encString(policy));
 
@@ -702,7 +961,7 @@ public class ImageConversionManager implements EventListener<ClockTick> {
         hmac.init(new SecretKeySpec(adminAccessKey.getSecretKey().getBytes("UTF-8"), "HmacSHA1"));
 
         this.importDisk.setUploadPolicySignature(
-            B64.standard.encString(hmac.doFinal(policy.getBytes("UTF-8"))));
+	     B64.standard.encString(hmac.doFinal(B64.standard.encString(policy).getBytes("UTF-8"))));
       }catch(final Exception ex){
         throw Exceptions.toUndeclared(ex);
       }
@@ -744,7 +1003,76 @@ public class ImageConversionManager implements EventListener<ClockTick> {
     }
   }
   
-  private abstract class ObjectStorageActivityTask extends ActivityTask<ObjectStorageRequestType, ObjectStorage> {
+  
+  private static class CreateTagsTask extends EucalyptusUserActivityTask {
+    private List<String> resourceIds = null;
+    private Map<String,String> tags = null;
+    private CreateTagsTask(final String userId, final List<String> resourceIds, final Map<String,String> tags){
+      super(userId);
+      this.resourceIds = resourceIds;
+      this.tags = tags;
+    }
+    
+    private CreateTagsType createTag(){
+      final CreateTagsType req = new CreateTagsType();
+      req.setResourcesSet(new ArrayList<String>(this.resourceIds));
+      req.setTagSet(new ArrayList<ResourceTag>());
+      for(final String key : this.tags.keySet()){
+        final ResourceTag tag = new ResourceTag();
+        tag.setKey(key);
+        tag.setValue(this.tags.get(key));
+        req.getTagSet().add(tag);
+      }
+      req.markPrivileged();
+      return req;
+    }
+    
+    @Override
+    void dispatchInternal(Checked<EucalyptusMessage> callback) {
+      final DispatchingClient<EucalyptusMessage, Eucalyptus> client = this.getClient();
+      client.dispatch(createTag(), callback);             
+    }
+
+    @Override
+    void dispatchSuccess(EucalyptusMessage response) {
+      final CreateTagsResponseType resp = (CreateTagsResponseType) response;
+    }
+  }
+  
+  private static class DeleteTagsTask extends EucalyptusUserActivityTask {
+    private List<String> resourceIds = null;
+    private List<String> tagKeys = null;
+    private DeleteTagsTask(final String userId, final List<String> resourceIds, final List<String> tagKeys){
+      super(userId);
+      this.resourceIds = resourceIds;
+      this.tagKeys = tagKeys;
+    }
+    
+    private DeleteTagsType deleteTag(){
+      final DeleteTagsType req = new DeleteTagsType();
+      req.setResourcesSet(new ArrayList<String>(resourceIds));
+      req.setTagSet(new ArrayList<DeleteResourceTag>());
+      for(final String tagKey : tagKeys){
+        final DeleteResourceTag tag = new DeleteResourceTag();
+        tag.setKey(tagKey);
+        req.getTagSet().add(tag);
+      }
+      req.markPrivileged();
+      return req;
+    }
+    @Override
+    void dispatchInternal(Checked<EucalyptusMessage> callback) {
+      final DispatchingClient<EucalyptusMessage, Eucalyptus> client = this.getClient();
+      client.dispatch(deleteTag(), callback);      
+    }
+
+    @Override
+    void dispatchSuccess(EucalyptusMessage response) {
+      final DeleteTagsResponseType resp = (DeleteTagsResponseType) response;
+    }
+  }
+  
+  private static abstract class ObjectStorageActivityTask extends ActivityTask<ObjectStorageRequestType, ObjectStorage> {
     @Override
     protected DispatchingClient<ObjectStorageRequestType, ObjectStorage> getClient() {
       try{
@@ -758,7 +1086,7 @@ public class ImageConversionManager implements EventListener<ClockTick> {
     }
   }
   
-  private abstract class ImagingSystemActivityTask extends ActivityTask<ImagingMessage, Imaging> {
+  private static abstract class ImagingSystemActivityTask extends ActivityTask<ImagingMessage, Imaging> {
     @Override
     protected DispatchingClient<ImagingMessage, Imaging> getClient() {
       try{
@@ -772,7 +1100,25 @@ public class ImageConversionManager implements EventListener<ClockTick> {
     }
   }
   
-  private abstract class EucalyptusActivityTask extends ActivityTask<EucalyptusMessage, Eucalyptus> {
+  private static abstract class EucalyptusUserActivityTask extends ActivityTask<EucalyptusMessage, Eucalyptus> {
+    private String userId = null;
+    private EucalyptusUserActivityTask(final String userId){
+      this.userId = userId;
+    }
+    @Override
+    protected DispatchingClient<EucalyptusMessage, Eucalyptus> getClient() {
+      try{
+        final DispatchingClient<EucalyptusMessage, Eucalyptus> client =
+            new DispatchingClient<>( userId, Eucalyptus.class );
+            client.init();
+            return client;
+      }catch(Exception e){
+        throw Exceptions.toUndeclared(e);
+      }
+    }
+  }
+  
+  private static abstract class EucalyptusActivityTask extends ActivityTask<EucalyptusMessage, Eucalyptus> {
     @Override
     protected DispatchingClient<EucalyptusMessage, Eucalyptus> getClient() {
       try{
@@ -786,7 +1132,7 @@ public class ImageConversionManager implements EventListener<ClockTick> {
     }
   }
 
-  private abstract class ActivityTask <TM extends BaseMessage, TC extends ComponentId>{
+  private static abstract class ActivityTask <TM extends BaseMessage, TC extends ComponentId>{
     private volatile boolean dispatched = false;
 
     protected ActivityTask(){}

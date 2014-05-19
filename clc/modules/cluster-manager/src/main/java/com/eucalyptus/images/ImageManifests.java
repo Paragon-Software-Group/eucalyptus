@@ -1,5 +1,5 @@
 /*************************************************************************
- * Copyright 2009-2012 Eucalyptus Systems, Inc.
+ * Copyright 2009-2014 Eucalyptus Systems, Inc.
  * 
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -67,66 +67,59 @@ import java.security.PublicKey;
 import java.security.Signature;
 import java.security.cert.Certificate;
 import java.security.cert.X509Certificate;
-import java.util.ArrayList;
 import java.util.List;
-import java.util.NoSuchElementException;
+
 import javax.xml.parsers.DocumentBuilder;
 import javax.xml.xpath.XPath;
 import javax.xml.xpath.XPathConstants;
 import javax.xml.xpath.XPathExpressionException;
 import javax.xml.xpath.XPathFactory;
+
+import com.amazonaws.services.s3.model.AccessControlList;
+import com.eucalyptus.objectstorage.client.EucaS3Client;
+import com.eucalyptus.objectstorage.client.EucaS3ClientFactory;
+
 import org.apache.log4j.Logger;
 import org.w3c.dom.Document;
 import org.w3c.dom.Node;
 import org.w3c.dom.NodeList;
+
 import com.eucalyptus.auth.Accounts;
 import com.eucalyptus.auth.AuthException;
 import com.eucalyptus.auth.principal.User;
-import com.eucalyptus.cloud.ImageMetadata;
-import com.eucalyptus.cloud.ImageMetadata.DeviceMappingType;
-import com.eucalyptus.cloud.ImageMetadata.StaticDiskImage;
-import com.eucalyptus.component.Components;
-import com.eucalyptus.component.Topology;
+import com.eucalyptus.compute.ClientComputeException;
+import com.eucalyptus.compute.common.CloudMetadatas;
+import com.eucalyptus.compute.common.ImageMetadata;
+import com.eucalyptus.compute.common.ImageMetadata.DeviceMappingType;
 import com.eucalyptus.component.auth.SystemCredentials;
 import com.eucalyptus.component.id.Eucalyptus;
 import com.eucalyptus.context.Context;
 import com.eucalyptus.context.Contexts;
-import com.eucalyptus.crypto.util.B64;
-import com.eucalyptus.objectstorage.Walrus;
-import com.eucalyptus.objectstorage.msgs.GetBucketAccessControlPolicyResponseType;
-import com.eucalyptus.objectstorage.msgs.GetBucketAccessControlPolicyType;
-import com.eucalyptus.objectstorage.msgs.GetObjectResponseType;
-import com.eucalyptus.objectstorage.msgs.GetObjectType;
 import com.eucalyptus.util.EucalyptusCloudException;
 import com.eucalyptus.util.FullName;
 import com.eucalyptus.util.RestrictedTypes;
 import com.eucalyptus.util.XMLParser;
-import com.eucalyptus.util.async.AsyncRequests;
-import com.eucalyptus.ws.client.ServiceDispatcher;
 import com.google.common.base.Function;
 import com.google.common.base.Predicate;
-import com.google.common.base.Strings;
 import com.google.common.collect.Iterables;
 import com.google.common.collect.Lists;
 
 public class ImageManifests {
   private static Logger LOG = Logger.getLogger( ImageManifests.class );
-  
-  static boolean verifyBucketAcl( String bucketName ) {
-    Context ctx = Contexts.lookup( );
-    GetBucketAccessControlPolicyType getBukkitInfo = new GetBucketAccessControlPolicyType( );
-    getBukkitInfo.setBucket( bucketName );
-    try {
-      GetBucketAccessControlPolicyResponseType reply = AsyncRequests.sendSync( Topology.lookup( Walrus.class ), getBukkitInfo );
-      String ownerName = reply.getAccessControlPolicy( ).getOwner( ).getDisplayName( );
-      String ownerId = reply.getAccessControlPolicy( ).getOwner( ).getID( );
-      return ctx.getUserFullName( ).getAccountNumber( ).equals( ownerId ) || ctx.getUserFullName( ).getUserId( ).equals( ownerId );
-    } catch ( Exception ex ) {
-      LOG.trace( ex, ex );
-      LOG.debug( ex );
+
+    static boolean verifyBucketAcl( String bucketName ) {
+        Context ctx = Contexts.lookup( );
+        try {
+            EucaS3Client s3Client = EucaS3ClientFactory.getEucaS3Client(Accounts.lookupSystemAdmin());
+            AccessControlList acl = s3Client.getBucketAcl(bucketName);
+            String ownerId = acl.getOwner( ).getId();
+            return ctx.getUserFullName( ).getAccountNumber( ).equals( ownerId ) || ctx.getUserFullName( ).getUserId( ).equals( ownerId );
+        } catch ( Exception ex ) {
+            LOG.trace( ex, ex );
+            LOG.debug("Failed verifying bucket acl for bucket " + bucketName, ex );
+        }
+        return false;
     }
-    return false;
-  }
   
   private static boolean verifyManifestSignature( final X509Certificate cert, final String signature, String pad ) {
     Signature sigVerifier;
@@ -155,19 +148,12 @@ public class ImageManifests {
   }
   
   static String requestManifestData( FullName userName, String bucketName, String objectName ) throws EucalyptusCloudException {
-    GetObjectResponseType reply = null;
-    try {
-      GetObjectType msg = new GetObjectType( bucketName, objectName, true, false, true );
-      // TODO:GRZE:WTF.
-      // User user = Accounts.lookupUserById( userName.getNamespace( ) );
-      // msg.setUserId( user.getName( ) );
-      msg.regarding( );
-      msg.setCorrelationId( Contexts.lookup( ).getRequest( ).getCorrelationId( ) );
-      reply = AsyncRequests.sendSync( Topology.lookup( Walrus.class ), msg );
-    } catch ( Exception e ) {
-      throw new EucalyptusCloudException( "Failed to read manifest file: " + bucketName + "/" + objectName, e );
-    }
-    return B64.url.decString( reply.getBase64Data( ).getBytes( ) );
+      try {
+          EucaS3Client s3Client = EucaS3ClientFactory.getEucaS3Client(Accounts.lookupSystemAdmin());
+          return s3Client.getObjectContent(bucketName, objectName);
+      } catch ( Exception e ) {
+          throw new EucalyptusCloudException( "Failed to read manifest file: " + bucketName + "/" + objectName, e );
+      }
   }
   
   public static class ManifestDeviceMapping {
@@ -213,6 +199,7 @@ public class ImageManifests {
     private Function<String, String>               xpathHelper;
     private String                                 encryptedKey;
     private String                                 encryptedIV;
+    private String                                 userId;
     private List<ManifestDeviceMapping>            deviceMappings = Lists.newArrayList( );
     
     ImageManifest( String imageLocation ) throws EucalyptusCloudException {
@@ -279,6 +266,9 @@ public class ImageManifests {
         ? temp
         : "SHA1";
       this.signature = ( ( temp = this.xpathHelper.apply( "//signature" ) ) != null )
+        ? temp
+        : null;
+      this.userId = ( ( temp = this.xpathHelper.apply( "//user" ) ) != null )
         ? temp
         : null;
       String typeInManifest = this.xpathHelper.apply( ImageMetadata.TYPE_MANIFEST_XPATH );
@@ -362,13 +352,13 @@ public class ImageManifests {
              && !( kId != null && ImageMetadata.Platform.windows.name( ).equals( kId ) ) ) {
           this.platform = ImageMetadata.Platform.linux;
           this.virtualizationType = ImageMetadata.VirtualizationType.paravirtualized;
-          if ( kId != null && kId.startsWith( ImageMetadata.Type.kernel.getTypePrefix( ) ) ) {
+          if ( CloudMetadatas.isKernelImageIdentifier( kId ) ) {
             ImageManifests.checkPrivileges( this.kernelId );
             this.kernelId = kId;
           } else {
             this.kernelId = null;
           }
-          if ( kId != null && kId.startsWith( ImageMetadata.Type.kernel.getTypePrefix( ) ) ) {
+          if ( CloudMetadatas.isRamdiskImageIdentifier( rId ) ) {
             ImageManifests.checkPrivileges( this.ramdiskId );
             this.ramdiskId = rId;
           } else {
@@ -474,6 +464,10 @@ public class ImageManifests {
       return this.name;
     }
     
+    public String getAccountId( ) {
+      return this.userId;
+    }
+    
     public Long getSize( ) {
       return this.size;
     }
@@ -498,6 +492,18 @@ public class ImageManifests {
   
   public static ImageManifest lookup( String imageLocation ) throws EucalyptusCloudException {
     return new ImageManifest( imageLocation );
+  }
+  
+  public static ImageManifest lookup( String imageLocation , User owner) throws EucalyptusCloudException {
+    final ImageManifest manifest =  new ImageManifest( imageLocation );
+    try{
+      final String ownerAcctId = owner.getAccountNumber();
+      if(ownerAcctId.equals(manifest.getAccountId()))
+        return manifest;
+    }catch(final AuthException ex){
+      throw new ClientComputeException("AuthFailure","Manifest is not accessible");
+    }
+    throw new ClientComputeException("AuthFailure","Manifest is not accessible");
   }
   
   static void checkPrivileges( String diskId ) throws EucalyptusCloudException {

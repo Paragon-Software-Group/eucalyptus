@@ -1,3 +1,23 @@
+/*************************************************************************
+ * Copyright 2013-2014 Eucalyptus Systems, Inc.
+ *
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; version 3 of the License.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program.  If not, see http://www.gnu.org/licenses/.
+ *
+ * Please contact Eucalyptus Systems, Inc., 6755 Hollister Ave., Goleta
+ * CA 93117, USA or visit http://www.eucalyptus.com/licenses/ if you need
+ * additional information or have any questions.
+ ************************************************************************/
+
 package com.eucalyptus.cloudformation.workflow
 
 import com.amazonaws.services.simpleworkflow.flow.core.AndPromise
@@ -18,9 +38,6 @@ import com.netflix.glisten.impl.swf.SwfWorkflowOperations
 import groovy.transform.CompileStatic
 import groovy.transform.TypeCheckingMode
 
-/**
- * Created by ethomas on 3/4/14.
- */
 @CompileStatic(TypeCheckingMode.SKIP)
 public class DeleteStackWorkflowImpl implements DeleteStackWorkflow {
 
@@ -86,7 +103,7 @@ public class DeleteStackWorkflowImpl implements DeleteStackWorkflow {
                   }
                 } // the assumption here is that the global resourceInfo map is up to date...
                 deletedResourceStatusMap.put(thisResourceId, ResourceStatus.IN_PROCESS);
-                waitFor(promiseFor(activities.deleteResource(resourceId, stackId, accountId,
+                waitFor(promiseFor(activities.deleteResource(thisResourceId, stackId, accountId,
                   effectiveUserId))) { String result->
                   JsonNode jsonNodeResult = JsonHelper.getJsonNodeFromString(result);
                   String returnResourceId = jsonNodeResult.get("resourceId").textValue();
@@ -94,6 +111,7 @@ public class DeleteStackWorkflowImpl implements DeleteStackWorkflow {
                   if (returnResourceStatus == "success") {
                     deletedResourceStatusMap.put(returnResourceId, ResourceStatus.COMPLETE);
                   }
+                  promiseFor(activities.logInfo("Chaining " + returnResourceId));
                   deletedResourcePromiseMap.get(returnResourceId).chain(promiseFor(DeleteStackWorkflowImpl.EMPTY_JSON_NODE));
                 }
               }
@@ -128,6 +146,7 @@ public class DeleteStackWorkflowImpl implements DeleteStackWorkflow {
             }
           }.withCatch { Throwable t->
             String errorMessage = ((t != null) &&  (t.getMessage() != null) ? t.getMessage() : null);
+            promiseFor(activities.logException(t));
             promiseFor(activities.createGlobalStackEvent(
               stackId,
               accountId,

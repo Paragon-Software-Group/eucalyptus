@@ -66,31 +66,29 @@ package com.eucalyptus.images;
 
 import org.apache.log4j.Logger;
 
-import com.eucalyptus.cloud.ImageMetadata;
-import com.eucalyptus.cloud.ImageMetadata.StaticDiskImage;
-import com.eucalyptus.component.Topology;
-import com.eucalyptus.context.Contexts;
+import com.eucalyptus.compute.common.ImageMetadata;
+import com.eucalyptus.compute.common.ImageMetadata.StaticDiskImage;
 import com.eucalyptus.images.ImageManifests.ImageManifest;
-import com.eucalyptus.objectstorage.Walrus;
-import com.eucalyptus.objectstorage.msgs.CacheImageResponseType;
-import com.eucalyptus.objectstorage.msgs.CacheImageType;
-import com.eucalyptus.objectstorage.msgs.FlushCachedImageType;
 import com.eucalyptus.util.EucalyptusCloudException;
-import com.eucalyptus.util.async.AsyncRequests;
 import com.google.common.base.Strings;
 
 public class StaticDiskImages {
   private static Logger LOG = Logger.getLogger( StaticDiskImages.class );
   
+  //TODO: zhill - can we remove this method altogether once image service is done?
   public static void flush( final StaticDiskImage staticImage ) {
-    String[] parts = staticImage.getManifestLocation( ).split( "/" );
+	  return;
+    /*String[] parts = staticImage.getManifestLocation( ).split( "/" );
     try {
       AsyncRequests.dispatch( Topology.lookup( Walrus.class ), new FlushCachedImageType( parts[0], parts[1] ) );
     } catch ( Exception e ) {}
+    */
   }
   
+  //TODO: zhill - can we remove this method when image service is done?
   public static void prepare( String imageLocation ) throws Exception {
-    String[] parts = imageLocation.split( "/" );
+	  return;
+    /*String[] parts = imageLocation.split( "/" );
     CacheImageType cache = new CacheImageType( ).regarding( Contexts.lookup( ).getRequest( ) );
     cache.setBucket( parts[0] );
     cache.setKey( parts[1] );
@@ -100,17 +98,18 @@ public class StaticDiskImages {
     } catch(Exception e) {
     	LOG.error("Error with cache image request for " + imageLocation,e);
     }
+    */
   }
   
   public static void check( final StaticDiskImage staticImage ) throws Exception {
     if ( staticImage != null ) {
-      ImageManifest manifest = ImageManifests.lookup( staticImage.getManifestLocation( ) );
-      if ( Strings.isNullOrEmpty( manifest.getSignature( ) ) || !manifest.getSignature( ).equals( staticImage ) ) {
+      ImageManifest manifest = ImageManifests.lookup( staticImage.getRunManifestLocation() );
+      if ( Strings.isNullOrEmpty( manifest.getSignature( ) ) || !manifest.getSignature( ).equals( staticImage.getSignature() ) ) {
         throw new EucalyptusCloudException( "Manifest signature has changed since registration." );
       }
-      LOG.info( "Triggering caching: " + staticImage.getManifestLocation( ) );
+      LOG.info( "Triggering caching: " + staticImage.getRunManifestLocation( ) );
       if ( staticImage instanceof ImageMetadata.StaticDiskImage ) {
-        StaticDiskImages.prepare( staticImage.getManifestLocation( ) );
+        StaticDiskImages.prepare( staticImage.getRunManifestLocation( ) );
       }
     }
   }

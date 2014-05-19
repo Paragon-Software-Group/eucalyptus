@@ -77,7 +77,9 @@ import com.eucalyptus.crypto.Hmac;
 
 public class WalrusLoginModule extends BaseLoginModule<WalrusWrappedCredentials> {
 	private static Logger LOG = Logger.getLogger( WalrusLoginModule.class );
-	public WalrusLoginModule() {}
+
+	public WalrusLoginModule() {
+	}
 
 	@Override
 	public boolean accepts( ) {
@@ -88,6 +90,9 @@ public class WalrusLoginModule extends BaseLoginModule<WalrusWrappedCredentials>
 	public boolean authenticate( WalrusWrappedCredentials credentials ) throws Exception {
 		String signature = credentials.getSignature().replaceAll("=", "");
     final AccessKey key = AccessKeys.lookupAccessKey( credentials.getQueryId(), credentials.getSecurityToken() );
+		if (!key.isActive()) {
+			throw new AuthenticationException("The AWS Access Key Id you provided does not exist in our records.");
+		}
 		final User user = key.getUser();
 		final String queryKey = key.getSecretKey();
 		final String authSig = checkSignature( queryKey, credentials.getLoginData() );
@@ -101,20 +106,17 @@ public class WalrusLoginModule extends BaseLoginModule<WalrusWrappedCredentials>
 	}
 
 	@Override
-	public void reset( ) {}
+	public void reset() {
+	}
 
-	protected String checkSignature( final String queryKey, final String subject ) throws AuthenticationException
-	{
+	protected String checkSignature(final String queryKey, final String subject) throws AuthenticationException {
 		SecretKeySpec signingKey = new SecretKeySpec( queryKey.getBytes(), Hmac.HmacSHA1.toString() );
-		try
-		{
+		try {
 			Mac mac = Mac.getInstance( Hmac.HmacSHA1.toString() );
 			mac.init( signingKey );
 			byte[] rawHmac = mac.doFinal( subject.getBytes() );
 			return new String(Base64.encode( rawHmac )).replaceAll( "=", "" );
-		}
-		catch ( Exception e )
-		{
+		} catch (Exception e) {
 			LOG.error( e, e );
 			throw new AuthenticationException( "Failed to compute signature" );
 		}

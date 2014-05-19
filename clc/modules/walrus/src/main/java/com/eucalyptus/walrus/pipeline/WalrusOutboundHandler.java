@@ -62,15 +62,23 @@
 
 package com.eucalyptus.walrus.pipeline;
 
+import com.eucalyptus.context.Contexts;
 import com.eucalyptus.storage.common.DateFormatter;
+import com.eucalyptus.storage.msgs.s3.MetaDataEntry;
 import com.eucalyptus.walrus.msgs.WalrusDataGetResponseType;
 import com.eucalyptus.walrus.msgs.WalrusDataResponseType;
+import com.eucalyptus.ws.WebServicesException;
+import com.eucalyptus.ws.server.Statistics;
+import com.google.common.base.Strings;
 import org.apache.log4j.Logger;
+import org.jboss.netty.channel.Channel;
 import org.jboss.netty.channel.ChannelEvent;
+import org.jboss.netty.channel.ChannelFuture;
 import org.jboss.netty.channel.ChannelFutureListener;
 import org.jboss.netty.channel.ChannelHandlerContext;
-import org.jboss.netty.channel.ExceptionEvent;
+import org.jboss.netty.channel.Channels;
 import org.jboss.netty.channel.MessageEvent;
+import org.jboss.netty.handler.codec.http.DefaultHttpResponse;
 import org.jboss.netty.handler.codec.http.HttpHeaders;
 import org.jboss.netty.handler.codec.http.HttpResponseStatus;
 
@@ -90,19 +98,50 @@ import com.eucalyptus.ws.handlers.MessageStackHandler;
 import edu.ucsb.eucalyptus.msgs.BaseMessage;
 import edu.ucsb.eucalyptus.msgs.EucalyptusErrorMessageType;
 import edu.ucsb.eucalyptus.msgs.ExceptionResponseType;
-import com.eucalyptus.walrus.msgs.AbortMultipartUploadResponseType;
-import com.eucalyptus.walrus.msgs.AbortMultipartUploadType;
-import com.eucalyptus.walrus.msgs.CompleteMultipartUploadResponseType;
-import com.eucalyptus.walrus.msgs.CompleteMultipartUploadType;
-import com.eucalyptus.walrus.msgs.InitiateMultipartUploadResponseType;
-import com.eucalyptus.walrus.msgs.InitiateMultipartUploadType;
-import com.eucalyptus.walrus.msgs.UploadPartResponseType;
-import com.eucalyptus.walrus.msgs.UploadPartType;
+import org.jboss.netty.handler.codec.http.HttpVersion;
+import org.jboss.netty.handler.stream.ChunkedInput;
+
+import java.util.Date;
+import java.util.List;
+import java.util.concurrent.Callable;
 
 public class WalrusOutboundHandler extends MessageStackHandler {
 	private static Logger LOG = Logger.getLogger( WalrusOutboundHandler.class );
 
 	@Override
+    public void handleDownstream(final ChannelHandlerContext ctx, final ChannelEvent channelEvent) throws Exception {
+        try {
+            if (channelEvent instanceof MessageEvent) {
+                final MessageEvent event = (MessageEvent) channelEvent;
+                if ( event.getMessage( ) != null ) {
+                    if ( event.getMessage( ) instanceof MappingHttpResponse ) {
+                        MappingHttpResponse httpResponse = ( MappingHttpResponse ) event.getMessage( );
+                        BaseMessage msg = (BaseMessage) httpResponse.getMessage( );
+                        if (msg instanceof  WalrusDataGetResponseType) {
+                            Callable<Long> stat = Statistics.startDownstream(ctx.getChannel(), this);
+                            boolean isDone = this.handleMessage(ctx, event);
+                            stat.call();
+
+                            if (isDone) {
+                                return;
+                            }
+                            //fall through and handle other types
+                        }
+                    }
+                    //handle other types
+                    Callable<Long> stat = Statistics.startDownstream( ctx.getChannel( ), this );
+                    this.outgoingMessage(ctx, event);
+                    stat.call();
+                }
+            }
+            ctx.sendDownstream(channelEvent);
+        } catch (Exception e) {
+            //TODO: zhill - this should be a error message sent downstream
+            throw new WebServicesException(e.getMessage(), HttpResponseStatus.BAD_REQUEST);//TODO:GRZE: this is not right; needs to propagate in the right direction wrt server vs. client
+        }
+    }
+
+    @Override
 	public void outgoingMessage( ChannelHandlerContext ctx, MessageEvent event ) throws Exception {
 		if ( event.getMessage( ) instanceof MappingHttpResponse ) {
 			MappingHttpResponse httpResponse = ( MappingHttpResponse ) event.getMessage( );
@@ -183,5 +222,83 @@ public class WalrusOutboundHandler extends MessageStackHandler {
 			} 
 		}
 	}
+
+    public boolean handleMessage(ChannelHandlerContext ctx, MessageEvent event) throws Exception {
+        return handleOutgoingMessage(ctx, event);
+    }
+
+    protected boolean handleOutgoingMessage(ChannelHandlerContext ctx, MessageEvent event) throws Exception {
+        if (event.getMessage() instanceof MappingHttpResponse) {
+            MappingHttpResponse httpResponse = (MappingHttpResponse) event.getMessage();
+            BaseMessage msg = (BaseMessage) httpResponse.getMessage();
+
+            if (msg instanceof WalrusDataGetResponseType) {
+                WalrusDataGetResponseType dataResponse = (WalrusDataGetResponseType) msg;
+                writeObjectStorageDataGetResponse(dataResponse, ctx);
+                return true;
+            }
+        }
+        return false;
+    }
+
+    protected void writeObjectStorageDataGetResponse(final WalrusDataGetResponseType response, final ChannelHandlerContext ctx) {
+        DefaultHttpResponse httpResponse = createHttpResponse(response);
+        if (!Strings.isNullOrEmpty(response.getCorrelationId())) {
+            httpResponse.setHeader(WalrusProperties.AMZ_REQUEST_ID, response.getCorrelationId());
+        }
+
+        final Channel channel = ctx.getChannel();
+        if (channel.isWritable()) {
+            ChannelFuture writeFuture = Channels.future(ctx.getChannel());
+            Channels.write(ctx, writeFuture, httpResponse);
+            List<ChunkedInput> dataStreams = response.getDataInputStream();
+            if (dataStreams != null) {
+                for (final ChunkedInput dataStream : dataStreams) {
+                    channel.write(dataStream).addListener(new ChannelFutureListener( ) {
+                        @Override public void operationComplete( ChannelFuture future ) throws Exception {
+                            dataStream.close();
+                        }
+                    });
+                }
+            } else {
+                writeFuture.addListener(ChannelFutureListener.CLOSE);
+            }
+        }
+    }
+
+    //TODO: zhill - this should all be done in bindings, just need 2-way bindings
+    protected DefaultHttpResponse createHttpResponse(WalrusDataGetResponseType reply) {
+        DefaultHttpResponse httpResponse = new DefaultHttpResponse(HttpVersion.HTTP_1_1, HttpResponseStatus.OK);
+        long contentLength = reply.getSize();
+        String contentType = reply.getContentType();
+        String etag = reply.getEtag();
+        String contentDisposition = reply.getContentDisposition();
+        httpResponse.addHeader(HttpHeaders.Names.CONTENT_TYPE, contentType != null ? contentType : "binary/octet-stream");
+        if (etag != null) {
+            httpResponse.addHeader(HttpHeaders.Names.ETAG, "\"" + etag + "\""); //etag in quotes, per s3-spec.
+        }
+        httpResponse.addHeader(HttpHeaders.Names.LAST_MODIFIED, DateFormatter.dateToHeaderFormattedString(reply.getLastModified()));
+
+        if (contentDisposition != null) {
+            httpResponse.addHeader("Content-Disposition", contentDisposition);
+        }
+        String versionId = reply.getVersionId();
+        if (versionId != null && !WalrusProperties.NULL_VERSION_ID.equals(versionId)) {
+            httpResponse.addHeader(WalrusProperties.X_AMZ_VERSION_ID, versionId);
+        }
+        httpResponse.setHeader(HttpHeaders.Names.DATE, DateFormatter.dateToHeaderFormattedString(new Date()));
+
+        //Add user metadata
+        for (MetaDataEntry m : reply.getMetaData()) {
+            httpResponse.addHeader(WalrusProperties.AMZ_META_HEADER_PREFIX + m.getName(), m.getValue());
+        }
+
+        //write extra headers
+        if (reply.getByteRangeEnd() != null && reply.getByteRangeStart() != null) {
+            httpResponse.addHeader("Content-Range", reply.getByteRangeStart() + "-" + reply.getByteRangeEnd() + "/" + reply.getSize());
+        }
+        httpResponse.addHeader(HttpHeaders.Names.CONTENT_LENGTH, String.valueOf(contentLength));
+        return httpResponse;
+    }
 
 }

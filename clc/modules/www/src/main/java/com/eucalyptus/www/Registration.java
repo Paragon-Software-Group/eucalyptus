@@ -1,5 +1,5 @@
 /*************************************************************************
- * Copyright 2009-2012 Eucalyptus Systems, Inc.
+ * Copyright 2009-2014 Eucalyptus Systems, Inc.
  *
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -62,6 +62,7 @@
 
 package com.eucalyptus.www;
 
+import static com.eucalyptus.compute.common.network.NetworkingFeature.ElasticIPs;
 import java.io.IOException;
 import java.util.UUID;
 import javax.crypto.Mac;
@@ -75,18 +76,14 @@ import javax.servlet.http.HttpServletResponse;
 import org.apache.log4j.Logger;
 import com.eucalyptus.auth.util.Hashes;
 import com.eucalyptus.blockstorage.Storage;
-import com.eucalyptus.cluster.Clusters;
-import com.eucalyptus.component.Components;
 import com.eucalyptus.component.ServiceConfiguration;
 import com.eucalyptus.component.ServiceConfigurations;
 import com.eucalyptus.component.ServiceUris;
 import com.eucalyptus.component.Topology;
-import com.eucalyptus.component.id.Eucalyptus;
+import com.eucalyptus.compute.common.Compute;
 import com.eucalyptus.crypto.Hmac;
-import com.eucalyptus.network.NetworkGroups;
-import com.eucalyptus.objectstorage.Walrus;
-import com.eucalyptus.util.Internets;
-import com.eucalyptus.ws.StackConfiguration;
+import com.eucalyptus.compute.common.network.Networking;
+import com.eucalyptus.objectstorage.ObjectStorage;
 import edu.ucsb.eucalyptus.cloud.entities.SystemConfiguration;
 
 public class Registration extends HttpServlet {
@@ -101,7 +98,7 @@ public class Registration extends HttpServlet {
   
   private static String getConfigurationString( String uuid ) {
     return "<CloudSchema>\n" + "  <Services type=\"array\">\n" + "    <Service>\n" + "      <Name>ec2</Name>\n" + "      <EndpointUrl>"
-       + ServiceUris.remote( Eucalyptus.class, Internets.localHostInetAddress( ) ) + "</EndpointUrl>\n" + "      <Resources type=\"array\">\n" + "        <Resource>\n"
+           + ServiceUris.remote( Topology.lookup( Compute.class ) ) + "</EndpointUrl>\n" + "      <Resources type=\"array\">\n" + "        <Resource>\n"
            + "          <Name>instances</Name>\n" + "        </Resource>\n" + "        <Resource>\n" + "          <Name>security_groups</Name>\n"
            + "        </Resource>\n" + "        <Resource>\n" + "          <Name>ssh_keys</Name>\n" + "        </Resource>\n" + "        <Resource>\n"
            + "          <Name>images</Name>\n" + "        </Resource>\n" + blockStorageConfiguration( ) + publicAddressConfiguration( )
@@ -131,7 +128,7 @@ public class Registration extends HttpServlet {
   }
   
   private static String publicAddressConfiguration( ) {
-    if ( NetworkGroups.networkingConfiguration( ).hasNetworking( ) ) {
+    if ( Networking.getInstance().supports( ElasticIPs ) ) {
       return "        <Resource>\n" + "          <Name>elastic_ips</Name>\n" + "        </Resource>\n";
     } else {
       return "";
@@ -139,8 +136,8 @@ public class Registration extends HttpServlet {
   }
   
   private static String getWalrusUrl( ) {
-    if( Topology.isEnabledLocally( Walrus.class ) ) {
-      ServiceConfiguration walrusConfig = Topology.lookup( Walrus.class );
+    if( Topology.isEnabled( ObjectStorage.class ) ) {
+      ServiceConfiguration walrusConfig = Topology.lookup( ObjectStorage.class );
       return ServiceUris.remote( walrusConfig ).toASCIIString( );
     } else {
       return "NOT REGISTERED.";

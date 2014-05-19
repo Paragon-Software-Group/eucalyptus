@@ -1,12 +1,29 @@
+/*************************************************************************
+ * Copyright 2013-2014 Eucalyptus Systems, Inc.
+ *
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; version 3 of the License.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program.  If not, see http://www.gnu.org/licenses/.
+ *
+ * Please contact Eucalyptus Systems, Inc., 6755 Hollister Ave., Goleta
+ * CA 93117, USA or visit http://www.eucalyptus.com/licenses/ if you need
+ * additional information or have any questions.
+ ************************************************************************/
+
 package com.eucalyptus.cloudformation.resources.standard.info
 
 import com.eucalyptus.cloudformation.resources.ResourceInfo
 import com.eucalyptus.cloudformation.resources.annotations.AttributeJson
 import groovy.transform.ToString
 
-/**
- * Created by ethomas on 2/16/14.
- */
 @ToString(includeNames=true)
 public class AWSAutoScalingAutoScalingGroupResourceInfo extends ResourceInfo {
   public AWSAutoScalingAutoScalingGroupResourceInfo() {
@@ -440,6 +457,16 @@ public class AWSElasticBeanstalkEnvironmentResourceInfo extends ResourceInfo {
 
 @ToString(includeNames=true)
 public class AWSElasticLoadBalancingLoadBalancerResourceInfo extends ResourceInfo {
+  @AttributeJson
+  String canonicalHostedZoneName;
+  @AttributeJson
+  String canonicalHostedZoneNameID;
+  @AttributeJson(name="DNSName")
+  String dnsName;
+  @AttributeJson(name="SourceSecurityGroup.GroupName")
+  String sourceSecurityGroupGroupName;
+  @AttributeJson(name="SourceSecurityGroup.OwnerAlias")
+  String sourceSecurityGroupOwnerAlias;
   public AWSElasticLoadBalancingLoadBalancerResourceInfo() {
     setType("AWS::ElasticLoadBalancing::LoadBalancer");
   }
@@ -448,6 +475,8 @@ public class AWSElasticLoadBalancingLoadBalancerResourceInfo extends ResourceInf
 
 @ToString(includeNames=true)
 public class AWSIAMAccessKeyResourceInfo extends ResourceInfo {
+  @AttributeJson
+  String secretAccessKey;
   public AWSIAMAccessKeyResourceInfo() {
     setType("AWS::IAM::AccessKey");
   }
@@ -462,6 +491,8 @@ public class AWSIAMAccessKeyResourceInfo extends ResourceInfo {
 
 @ToString(includeNames=true)
 public class AWSIAMGroupResourceInfo extends ResourceInfo {
+  @AttributeJson
+  String arn;
   public AWSIAMGroupResourceInfo() {
     setType("AWS::IAM::Group");
   }
@@ -476,6 +507,8 @@ public class AWSIAMGroupResourceInfo extends ResourceInfo {
 
 @ToString(includeNames=true)
 public class AWSIAMInstanceProfileResourceInfo extends ResourceInfo {
+  @AttributeJson
+  String arn;
   public AWSIAMInstanceProfileResourceInfo() {
     setType("AWS::IAM::InstanceProfile");
   }
@@ -504,6 +537,8 @@ public class AWSIAMPolicyResourceInfo extends ResourceInfo {
 
 @ToString(includeNames=true)
 public class AWSIAMRoleResourceInfo extends ResourceInfo {
+  @AttributeJson
+  String arn;
   public AWSIAMRoleResourceInfo() {
     setType("AWS::IAM::Role");
   }
@@ -518,6 +553,8 @@ public class AWSIAMRoleResourceInfo extends ResourceInfo {
 
 @ToString(includeNames=true)
 public class AWSIAMUserResourceInfo extends ResourceInfo {
+  @AttributeJson
+  String arn;
   public AWSIAMUserResourceInfo() {
     setType("AWS::IAM::User");
   }

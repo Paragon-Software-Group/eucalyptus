@@ -1,10 +1,29 @@
+/*************************************************************************
+ * Copyright 2013-2014 Eucalyptus Systems, Inc.
+ *
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; version 3 of the License.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program.  If not, see http://www.gnu.org/licenses/.
+ *
+ * Please contact Eucalyptus Systems, Inc., 6755 Hollister Ave., Goleta
+ * CA 93117, USA or visit http://www.eucalyptus.com/licenses/ if you need
+ * additional information or have any questions.
+ ************************************************************************/
+
 package com.eucalyptus.cloudformation.template;
 
 import com.eucalyptus.cloudformation.CloudFormationException;
 import com.eucalyptus.cloudformation.ValidationErrorException;
 import com.eucalyptus.cloudformation.entity.StackEntity;
 import com.eucalyptus.cloudformation.entity.StackEntityHelper;
-import com.eucalyptus.cloudformation.resources.ResourceAttributeResolver;
 import com.eucalyptus.cloudformation.resources.ResourceInfo;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -17,15 +36,12 @@ import java.beans.Introspector;
 import java.util.List;
 import java.util.Map;
 
-/**
-* Created by ethomas on 1/30/14.
-*/
 public enum IntrinsicFunctions implements IntrinsicFunction {
   NO_VALUE {
     @Override
     public MatchResult evaluateMatch(JsonNode jsonNode) {
-      boolean match = ((jsonNode == null)
-        || (
+      boolean match = ((jsonNode != null)
+        && (
         jsonNode.isObject() && jsonNode.size() == 1 && jsonNode.has(FunctionEvaluation.REF_STR) && jsonNode.get(FunctionEvaluation.REF_STR) != null
           && jsonNode.get(FunctionEvaluation.REF_STR).isTextual() && FunctionEvaluation.AWS_NO_VALUE.equals(jsonNode.get(FunctionEvaluation.REF_STR).textValue())
       ));
@@ -636,8 +652,8 @@ public enum IntrinsicFunctions implements IntrinsicFunction {
     @Override
     public MatchResult evaluateMatch(JsonNode jsonNode) {
       // Something that starts with Fn:  (any existing functions will already have been evaluated)
-      boolean match = ((jsonNode == null)
-        || (
+      boolean match = ((jsonNode != null)
+        && (
         jsonNode.isObject() && jsonNode.size() == 1 && jsonNode.fieldNames().next().startsWith("Fn:")
       ));
       return new MatchResult(match, jsonNode, this);

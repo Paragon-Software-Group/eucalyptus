@@ -20,14 +20,9 @@
 package com.eucalyptus.cloudformation.template;
 
 import com.eucalyptus.cloudformation.CloudFormationException;
-import com.eucalyptus.cloudformation.CreateStackResult;
 import com.eucalyptus.cloudformation.InsufficientCapabilitiesException;
 import com.eucalyptus.cloudformation.Parameter;
-import com.eucalyptus.cloudformation.Parameters;
 import com.eucalyptus.cloudformation.ResourceList;
-import com.eucalyptus.cloudformation.Stack;
-import com.eucalyptus.cloudformation.StackCreator;
-import com.eucalyptus.cloudformation.TemplateParameter;
 import com.eucalyptus.cloudformation.TemplateParameters;
 import com.eucalyptus.cloudformation.ValidateTemplateResult;
 import com.eucalyptus.cloudformation.ValidationErrorException;
@@ -282,7 +277,7 @@ public class TemplateParser {
         requiredCapabilities.addAll(resourceInfo.getRequiredCapabilities());
       }
     }
-    List<String> missingRequiredCapabilities = Lists.newArrayList();
+    Set<String> missingRequiredCapabilities = Sets.newLinkedHashSet();
     if (!requiredCapabilities.isEmpty()) {
       for (String requiredCapability:requiredCapabilities) {
         if (capabilities == null || !capabilities.contains(requiredCapability)) {
@@ -748,7 +743,7 @@ public class TemplateParser {
         JsonNode conditionJsonNode = conditionsJsonNode.get(conditionName);
         // Don't like to have to roll/unroll condition map like this but evaluateFunctions is used post-map a lot
         Map<String, Boolean> conditionMap = StackEntityHelper.jsonToConditionMap(template.getStackEntity().getConditionMapJson());
-        // just put a placeholder in if evaluating11111111111111111111111
+        // just put a placeholder in if evaluating
         if (onlyEvaluateTemplate) {
           conditionMap.put(conditionName, Boolean.FALSE);
         } else {
@@ -819,7 +814,7 @@ public class TemplateParser {
     // Check "Fn::GetAtt" (make sure not resource or attribute)
     IntrinsicFunction.MatchResult fnAttMatcher = IntrinsicFunctions.GET_ATT.evaluateMatch(currentNode);
     if (fnAttMatcher.isMatch()) {
-      IntrinsicFunctions.GET_ATT.validateArgTypesWherePossible(refMatcher);
+      IntrinsicFunctions.GET_ATT.validateArgTypesWherePossible(fnAttMatcher);
       // we have a match against a "ref"...
       String refName = currentNode.get(FunctionEvaluation.FN_GET_ATT).get(0).textValue();
       String attName = currentNode.get(FunctionEvaluation.FN_GET_ATT).get(1).textValue();
@@ -1040,7 +1035,7 @@ public class TemplateParser {
     // Check "Fn::GetAtt" (make sure not resource or attribute)
     IntrinsicFunction.MatchResult fnAttMatcher = IntrinsicFunctions.GET_ATT.evaluateMatch(jsonNode);
     if (fnAttMatcher.isMatch()) {
-      IntrinsicFunctions.GET_ATT.validateArgTypesWherePossible(refMatcher);
+      IntrinsicFunctions.GET_ATT.validateArgTypesWherePossible(fnAttMatcher);
       // we have a match against a "ref"...
       String refName = jsonNode.get(FunctionEvaluation.FN_GET_ATT).get(0).textValue();
       String attName = jsonNode.get(FunctionEvaluation.FN_GET_ATT).get(1).textValue();
@@ -1104,6 +1099,30 @@ public class TemplateParser {
         FunctionEvaluation.validateNonConditionSectionArgTypesWherePossible(outputsJsonNode.get(outputKey));
         StackEntity.Output output = new StackEntity.Output();
         output.setKey(outputKey);
+        JsonNode outputValueNode = outputJsonNode.get(OutputKey.Value.toString());
+        boolean match = false;
+        for (IntrinsicFunction intrinsicFunction: IntrinsicFunctions.values()) {
+          IntrinsicFunction.MatchResult matchResult = intrinsicFunction.evaluateMatch(outputValueNode);
+          if (matchResult.isMatch()) {
+            match = true;
+            intrinsicFunction.validateArgTypesWherePossible(matchResult);
+            if (intrinsicFunction == IntrinsicFunctions.IF) {
+              // don't allow if... (strange, other functions are ok).  Note: This is only at the top level.  Ifs are allowed within other functions. (AWS?!!)
+              throw new ValidationErrorException("The Value field of every Outputs member must evaluate to a String and not a Map.");
+            }
+          }
+        }
+        if (!match) {
+          if (outputValueNode.isObject()) {
+            throw new ValidationErrorException("The Value field of every Outputs member must evaluate to a String and not a Map.");
+          }
+
+          if (outputValueNode.isArray()) {
+            throw new ValidationErrorException("The Value field of every Outputs member must evaluate to a String and not a List.");
+          }
+        }
+
+
         output.setJsonValue(JsonHelper.getStringFromJsonNode(outputJsonNode.get(OutputKey.Value.toString())));
         output.setReady(false);
         output.setAllowedByCondition(conditionMap.get(conditionKey) != Boolean.FALSE);

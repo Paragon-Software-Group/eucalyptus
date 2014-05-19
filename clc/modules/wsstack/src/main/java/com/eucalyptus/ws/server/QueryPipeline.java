@@ -1,5 +1,5 @@
 /*************************************************************************
- * Copyright 2009-2012 Eucalyptus Systems, Inc.
+ * Copyright 2009-2013 Eucalyptus Systems, Inc.
  *
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -19,6 +19,7 @@
  ************************************************************************/
 package com.eucalyptus.ws.server;
 
+import static com.eucalyptus.auth.principal.TemporaryAccessKey.TemporaryKeyType;
 import java.util.EnumSet;
 import java.util.HashMap;
 import java.util.Map;
@@ -31,10 +32,14 @@ import org.jboss.netty.handler.codec.http.HttpHeaders;
 import org.jboss.netty.handler.codec.http.HttpMethod;
 import org.jboss.netty.handler.codec.http.HttpRequest;
 import com.eucalyptus.http.MappingHttpRequest;
+import com.eucalyptus.util.CollectionUtils;
+import com.eucalyptus.util.Strings;
 import com.eucalyptus.ws.protocol.RequiredQueryParams;
 import com.eucalyptus.ws.stages.HmacUserAuthenticationStage;
 import com.eucalyptus.ws.stages.UnrollableStage;
+import com.google.common.base.Predicates;
 import com.google.common.collect.ImmutableSet;
+import com.google.common.collect.Iterables;
 import com.google.common.collect.Sets;
 
 /**
@@ -43,25 +48,34 @@ import com.google.common.collect.Sets;
 public abstract class QueryPipeline extends FilteredPipeline {
   private final HmacUserAuthenticationStage auth;
   private final String name;
-  private final String servicePathPrefix;
+  private final Set<String> servicePathPrefixes;
   private final Set<RequiredQueryParams> requiredQueryParams;
 
   protected QueryPipeline( final String name,
                            final String servicePathPrefix,
-                           final boolean allowTemporaryCredentials) {
+                           final Set<TemporaryKeyType> allowedTemporaryCredentials ) {
     this( name,
-          servicePathPrefix,
-          allowTemporaryCredentials,
+          ImmutableSet.of( servicePathPrefix ),
+          allowedTemporaryCredentials,
           EnumSet.allOf( RequiredQueryParams.class ) );
   }
 
   protected QueryPipeline( final String name,
                            final String servicePathPrefix,
-                           final boolean allowTemporaryCredentials,
+                           final Set<TemporaryKeyType> allowedTemporaryCredentials,
                            final Set<RequiredQueryParams> requiredQueryParams ) {
-    this.auth = new HmacUserAuthenticationStage( allowTemporaryCredentials );
+    this( name,
+          ImmutableSet.of( servicePathPrefix ),
+          allowedTemporaryCredentials,
+          requiredQueryParams );
+  }
+  protected QueryPipeline( final String name,
+                           final Set<String> servicePathPrefixes,
+                           final Set<TemporaryKeyType> allowedTemporaryCredentials,
+                           final Set<RequiredQueryParams> requiredQueryParams ) {
+    this.auth = new HmacUserAuthenticationStage( allowedTemporaryCredentials );
     this.name = name;
-    this.servicePathPrefix = servicePathPrefix;
+    this.servicePathPrefixes = ImmutableSet.copyOf( servicePathPrefixes );
     this.requiredQueryParams = ImmutableSet.copyOf( requiredQueryParams );
   }
 
@@ -115,8 +129,8 @@ public abstract class QueryPipeline extends FilteredPipeline {
           }
         }
       }
-      final boolean usesServicePath = message.getUri( ).startsWith( servicePathPrefix );
-      final boolean noPath = message.getUri( ).isEmpty( ) || message.getUri( ).equals( "/" );
+      final boolean usesServicePath = Iterables.any( servicePathPrefixes, Strings.isPrefixOf( message.getUri( ) ) );
+      final boolean noPath = message.getUri( ).isEmpty( ) || message.getUri( ).equals( "/" ) || message.getUri( ).startsWith( "/?" );
       return
           usesServicePath ||
           ( noPath && resolvesByHost( message.getHeader( HttpHeaders.Names.HOST ) ) );

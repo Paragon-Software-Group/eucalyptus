@@ -63,7 +63,7 @@
 package com.eucalyptus.images;
 
 import java.util.Set;
-import com.eucalyptus.cloud.ImageMetadata;
+import com.eucalyptus.compute.common.ImageMetadata;
 
 public interface BootableImageInfo {
  
@@ -88,5 +88,7 @@ public interface BootableImageInfo {
   String getRootDeviceName( );
   
   String getRootDeviceType( );
-  
+
+  ImageMetadata.Architecture getArchitecture( );
+
 }

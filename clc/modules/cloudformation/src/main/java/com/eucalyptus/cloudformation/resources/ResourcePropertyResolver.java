@@ -1,3 +1,23 @@
+/*************************************************************************
+ * Copyright 2013-2014 Eucalyptus Systems, Inc.
+ *
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; version 3 of the License.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program.  If not, see http://www.gnu.org/licenses/.
+ *
+ * Please contact Eucalyptus Systems, Inc., 6755 Hollister Ave., Goleta
+ * CA 93117, USA or visit http://www.eucalyptus.com/licenses/ if you need
+ * additional information or have any questions.
+ ************************************************************************/
+
 package com.eucalyptus.cloudformation.resources;
 
 import com.eucalyptus.cloudformation.CloudFormationException;
@@ -31,9 +51,6 @@ import java.util.Collection;
 import java.util.List;
 import java.util.Map;
 
-/**
- * Created by ethomas on 2/3/14.
- */
 public class ResourcePropertyResolver {
   private static final Logger LOG = Logger.getLogger(ResourcePropertyResolver.class);
   public static JsonNode getJsonNodeFromResourceProperties(ResourceProperties resourceProperties) throws CloudFormationException {
@@ -72,6 +89,8 @@ public class ResourcePropertyResolver {
         jsonNode.put(name, String.valueOf((Double) objectValue));
       } else if (objectValue instanceof Boolean) {
         jsonNode.put(name, String.valueOf((Boolean) objectValue));
+      } else if (objectValue instanceof JsonNode) {
+        jsonNode.put(name, (JsonNode) objectValue);
       } else if (objectValue instanceof Collection) {
         jsonNode.put(name, getJsonNodeFromCollection((Collection<?>) objectValue));
       } else {
@@ -96,6 +115,8 @@ public class ResourcePropertyResolver {
         jsonNode.add(String.valueOf((Double) object));
       } else if (object instanceof Boolean) {
         jsonNode.add(String.valueOf((Boolean) object));
+      } else if (object instanceof JsonNode) {
+        jsonNode.add((JsonNode) object);
       } else if (object instanceof Collection) {
         jsonNode.add(getJsonNodeFromCollection((Collection) object));
       } else {
@@ -131,7 +152,7 @@ public class ResourcePropertyResolver {
       }
       if (!jsonNode.has(name)) continue; // no value to populate...
       JsonNode valueNode = jsonNode.get(name);
-      LOG.info("Populating property with: " + name + "=" + valueNode + " " + valueNode.getClass());
+      LOG.debug("Populating property with: " + name + "=" + valueNode + " " + valueNode.getClass());
       if (field.getType().equals(String.class)) {
         if (!valueNode.isTextual()) {
           throw new ValidationErrorException("Template error: " + name + " must be of type String");

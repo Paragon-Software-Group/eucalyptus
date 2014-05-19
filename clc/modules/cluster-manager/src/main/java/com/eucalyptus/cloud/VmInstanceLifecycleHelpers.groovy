@@ -296,7 +296,7 @@ class VmInstanceLifecycleHelpers {
     void cleanUpInstance(
         final VmInstance instance,
         final VmState state ) {
-      if ( VmInstance.VmStateSet.DONE.contains( state ) || VmInstance.VmStateSet.TORNDOWN.contains( state ) ) try {
+      if ( VmInstance.VmStateSet.TORNDOWN.contains( state ) ) try {
         if ( instance.networkIndex == null &&
             !Strings.isNullOrEmpty( instance.privateAddress ) &&
             !VmNetworkConfig.DEFAULT_IP.equals( instance.privateAddress ) ) {
@@ -382,7 +382,7 @@ class VmInstanceLifecycleHelpers {
     void cleanUpInstance(
         final VmInstance instance,
         final VmState state ) {
-      if ( VmInstance.VmStateSet.DONE.contains( state ) && Entities.isPersistent( instance ) ) try {
+      if ( VmInstance.VmStateSet.TORNDOWN.contains( state ) && Entities.isPersistent( instance ) ) try {
         if ( instance.networkIndex != null ) {
           instance.networkIndex.release( )
           instance.networkIndex.teardown( )
@@ -565,10 +565,14 @@ class VmInstanceLifecycleHelpers {
         final StatefulMessageSet<State> messages
     ) {
       final NetworkGroup net = allocation.getPrimaryNetwork( )
-      if ( net != null && net.hasExtantNetwork( ) ) {
-        final Request callback = AsyncRequests.newRequest( new StartNetworkCallback( allocation.getExtantNetwork( ) ) )
-        messages.addRequest( State.CREATE_NETWORK, callback )
-        EventRecord.here( ClusterAllocator, EventType.VM_PREPARE, callback.getClass( ).getSimpleName( ), net.toString( ) ).debug( )
+      if ( net ) {
+        Entities.transaction( NetworkGroup ) { EntityTransaction db ->
+          if ( Entities.merge( net ).hasExtantNetwork( ) ) {
+            final Request callback = AsyncRequests.newRequest( new StartNetworkCallback( allocation.getExtantNetwork( ) ) )
+            messages.addRequest( State.CREATE_NETWORK, callback )
+            EventRecord.here( ClusterAllocator, EventType.VM_PREPARE, callback.getClass( ).getSimpleName( ), net.toString( ) ).debug( )
+          }
+        }
       }
     }
   }

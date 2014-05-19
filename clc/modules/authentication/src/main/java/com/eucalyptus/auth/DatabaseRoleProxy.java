@@ -19,6 +19,8 @@
  ************************************************************************/
 package com.eucalyptus.auth;
 
+import java.io.IOException;
+import java.io.ObjectInputStream;
 import java.util.Date;
 import java.util.EnumSet;
 import java.util.List;
@@ -39,12 +41,14 @@ import com.eucalyptus.auth.principal.Authorization;
 import com.eucalyptus.auth.principal.InstanceProfile;
 import com.eucalyptus.auth.principal.Policy;
 import com.eucalyptus.auth.principal.Role;
-import com.eucalyptus.entities.EntityWrapper;
+import com.eucalyptus.entities.Entities;
+import com.eucalyptus.entities.TransactionResource;
 import com.eucalyptus.util.Callback;
 import com.eucalyptus.util.Exceptions;
 import com.eucalyptus.util.OwnerFullName;
 import com.eucalyptus.util.Tx;
 import com.google.common.base.Strings;
+import com.google.common.base.Supplier;
 import com.google.common.collect.Lists;
 
 /**
@@ -59,6 +63,8 @@ public class DatabaseRoleProxy implements Role {
   private static final ValueChecker POLICY_NAME_CHECKER = ValueCheckerFactory.createPolicyNameChecker( );
 
   private RoleEntity delegate;
+  private transient Supplier<String> accountNumberSupplier =
+      DatabaseAuthUtils.getAccountNumberSupplier( this );
 
   public DatabaseRoleProxy( RoleEntity delegate ) {
     this.delegate = delegate;
@@ -139,28 +145,29 @@ public class DatabaseRoleProxy implements Role {
   public Policy setAssumeRolePolicy( final String policy ) throws AuthException, PolicyParseException {
     final PolicyEntity parsedPolicy = PolicyParser.getResourceInstance().parse( policy );
     parsedPolicy.setName( "assume-role-policy-for-" + getRoleId() );
-    final EntityWrapper<RoleEntity> db = EntityWrapper.get( RoleEntity.class );
-    try {
-      final RoleEntity roleEntity = getRoleEntity( db );
+    try ( final TransactionResource db = Entities.transactionFor( RoleEntity.class ) ) {
+      final RoleEntity roleEntity = getRoleEntity( );
       // Due to https://hibernate.onjira.com/browse/HHH-6484 we must explicitly delete the old policy
       final PolicyEntity oldAssumeRolePolicy = roleEntity.getAssumeRolePolicy();
       roleEntity.setAssumeRolePolicy( parsedPolicy );
-      db.recast( PolicyEntity.class ).delete( oldAssumeRolePolicy );
-      final PolicyEntity persistedPolicyEntity =
-          db.recast( PolicyEntity.class ).persist( parsedPolicy );
+      Entities.delete( oldAssumeRolePolicy );
+      final PolicyEntity persistedPolicyEntity = Entities.persist( parsedPolicy );
       db.commit( );
       return new DatabasePolicyProxy( persistedPolicyEntity );
     } catch ( Exception e ) {
       Debugging.logError( LOG, e, "Failed to set assume role policy for " + this.delegate.getName( ) );
       throw new AuthException( "Failed to set assume role policy", e );
-    } finally {
-      if ( db.isActive() ) db.rollback();
     }
   }
 
   @Override
   public Date getCreationTimestamp() {
     return delegate.getCreationTimestamp();
+  }
+
+  @Override
+  public String getAccountNumber() throws AuthException {
+    return DatabaseAuthUtils.extract( accountNumberSupplier );
   }
 
   @Override
@@ -178,9 +185,8 @@ public class DatabaseRoleProxy implements Role {
   @Override
   public List<Policy> getPolicies() throws AuthException {
     final List<Policy> results = Lists.newArrayList( );
-    final EntityWrapper<RoleEntity> db = EntityWrapper.get( RoleEntity.class );
-    try {
-      final RoleEntity role = getRoleEntity( db );
+    try ( final TransactionResource db = Entities.transactionFor( RoleEntity.class ) ) {
+      final RoleEntity role = getRoleEntity( );
       for ( final PolicyEntity policyEntity : role.getPolicies( ) ) {
         results.add( new DatabasePolicyProxy( policyEntity ) );
       }
@@ -188,34 +194,41 @@ public class DatabaseRoleProxy implements Role {
     } catch ( Exception e ) {
       Debugging.logError( LOG, e, "Failed to get policies for " + this.delegate );
       throw new AuthException( "Failed to get policies", e );
-    } finally {
-      db.rollback();
     }
   }
 
   @Override
-  public Policy addPolicy( final String name, final String policy ) throws AuthException, PolicyParseException {
+  public Policy addPolicy( String name, String policy ) throws AuthException, PolicyParseException {
+    return storePolicy( name, policy, /*allowUpdate*/ false );
+  }
+
+  @Override
+  public Policy putPolicy( String name, String policy ) throws AuthException, PolicyParseException {
+    return storePolicy( name, policy, /*allowUpdate*/ true );
+  }
+
+  private Policy storePolicy( String name, String policy, boolean allowUpdate ) throws AuthException, PolicyParseException {
     check( POLICY_NAME_CHECKER, AuthException.INVALID_NAME, name );
-    if ( DatabaseAuthUtils.policyNameinList( name, this.getPolicies( ) ) ) {
+    if ( DatabaseAuthUtils.policyNameinList( name, this.getPolicies( ) ) && !allowUpdate ) {
       Debugging.logError( LOG, null, "Policy name already used: " + name );
       throw new AuthException( AuthException.INVALID_NAME );
     }
     final PolicyEntity parsedPolicy = PolicyParser.getInstance().parse( policy );
     parsedPolicy.setName( name );
-    final EntityWrapper<RoleEntity> db = EntityWrapper.get( RoleEntity.class );
-    try {
-      final RoleEntity roleEntity = getRoleEntity( db );
+    try ( final TransactionResource db = Entities.transactionFor( RoleEntity.class ) ) {
+      final RoleEntity roleEntity = getRoleEntity( );
+      final PolicyEntity remove = DatabaseAuthUtils.removeNamedPolicy( roleEntity.getPolicies( ), name );
+      if ( remove != null ) {
+        Entities.delete( remove );
+      }
       parsedPolicy.setRole( roleEntity );
       roleEntity.getPolicies( ).add( parsedPolicy );
-      final PolicyEntity persistedPolicyEntity =
-          db.recast( PolicyEntity.class ).persist( parsedPolicy );
+      final PolicyEntity persistedPolicyEntity = Entities.persist( parsedPolicy );
       db.commit( );
       return new DatabasePolicyProxy( persistedPolicyEntity );
     } catch ( Exception e ) {
       Debugging.logError( LOG, e, "Failed to attach policy for " + this.delegate.getName( ) );
       throw new AuthException( "Failed to attach policy", e );
-    } finally {
-      if ( db.isActive() ) db.rollback();
     }
   }
 
@@ -224,29 +237,23 @@ public class DatabaseRoleProxy implements Role {
     if ( Strings.isNullOrEmpty( name ) ) {
       throw new AuthException( AuthException.EMPTY_POLICY_NAME );
     }
-    final EntityWrapper<RoleEntity> db = EntityWrapper.get( RoleEntity.class );
-    try {
-      final RoleEntity roleEntity = getRoleEntity( db );
+    try ( final TransactionResource db = Entities.transactionFor( RoleEntity.class ) ) {
+      final RoleEntity roleEntity = getRoleEntity( );
       final PolicyEntity policy = DatabaseAuthUtils.removeNamedPolicy( roleEntity.getPolicies(), name );
-      if ( policy != null ) {
-        db.recast( PolicyEntity.class ).delete( policy );
-      }
+      if ( policy != null ) Entities.delete( policy );
       db.commit( );
     } catch ( Exception e ) {
       Debugging.logError( LOG, e, "Failed to remove policy " + name + " in " + this.delegate );
       throw new AuthException( "Failed to remove policy", e );
-    } finally {
-      if ( db.isActive() ) db.rollback();
     }
   }
 
   @Override
   public List<InstanceProfile> getInstanceProfiles() throws AuthException {
     final List<InstanceProfile> results = Lists.newArrayList( );
-    final EntityWrapper<InstanceProfileEntity> db = EntityWrapper.get( InstanceProfileEntity.class );
-    try {
+    try ( final TransactionResource db = Entities.transactionFor( InstanceProfileEntity.class ) ) {
       @SuppressWarnings( "unchecked" )
-      List<InstanceProfileEntity> instanceProfiles = ( List<InstanceProfileEntity> ) db
+      List<InstanceProfileEntity> instanceProfiles = ( List<InstanceProfileEntity> ) Entities
           .createCriteria( InstanceProfileEntity.class )
           .createCriteria( "role" ).add( Restrictions.eq( "name", this.delegate.getName( ) ) )
           .setCacheable( true )
@@ -258,20 +265,29 @@ public class DatabaseRoleProxy implements Role {
     } catch ( Exception e ) {
       Debugging.logError( LOG, e, "Failed to get instance profiles for " + this.delegate.getName( ) );
       throw new AuthException( "Failed to get instance profiles", e );
-    } finally {
-      if ( db.isActive() ) db.rollback();
     }
   }
 
+  @SuppressWarnings( "unchecked" )
   @Override
   public List<Authorization> lookupAuthorizations( final String resourceType ) throws AuthException {
-    if ( resourceType == null ) {
-      throw new AuthException( "Empty resource type" );
-    }
-    final EntityWrapper<AuthorizationEntity> db = EntityWrapper.get( AuthorizationEntity.class );
-    try {
-      @SuppressWarnings( "unchecked" )
-      final List<AuthorizationEntity> authorizations = ( List<AuthorizationEntity> ) db
+    try ( final TransactionResource db = Entities.transactionFor( AuthorizationEntity.class ) ) {
+      List<AuthorizationEntity> authorizations;
+      if ( resourceType == null ) {
+        // Load authorizations for determining if action may be permitted
+        // deny effects are not required
+        authorizations = ( List<AuthorizationEntity> ) Entities
+            .createCriteria( AuthorizationEntity.class ).add(
+                Restrictions.eq( "effect", Authorization.EffectType.Allow )
+            )
+            .createCriteria( "statement" )
+            .createCriteria( "policy" )
+            .createCriteria( "role" ).add(
+                Restrictions.eq( "roleId", getRoleId() ) )
+            .setCacheable( true )
+            .list();
+      } else {
+        authorizations = ( List<AuthorizationEntity> ) Entities
           .createCriteria( AuthorizationEntity.class ).add(
               Restrictions.and(
                   Restrictions.or( Restrictions.eq( "type", resourceType ), Restrictions.eq( "type", "*" )),
@@ -282,6 +298,7 @@ public class DatabaseRoleProxy implements Role {
               Restrictions.eq( "roleId", getRoleId() ) )
           .setCacheable( true )
           .list();
+      }
       final List<Authorization> results = Lists.newArrayList( );
       for ( final AuthorizationEntity auth : authorizations ) {
         results.add( new DatabaseAuthorizationProxy( auth ) );
@@ -290,17 +307,14 @@ public class DatabaseRoleProxy implements Role {
     } catch ( Exception e ) {
       Debugging.logError( LOG, e, "Failed to lookup authorization for user with ID " + getRoleId() + ", type=" + resourceType);
       throw new AuthException( "Failed to lookup auth", e );
-    } finally {
-      if ( db.isActive() ) db.rollback();
     }
   }
 
   @Override
   public List<Authorization> lookupQuotas( final String resourceType ) throws AuthException {
-    final EntityWrapper<AuthorizationEntity> db = EntityWrapper.get( AuthorizationEntity.class );
-    try {
+    try ( final TransactionResource db = Entities.transactionFor( AuthorizationEntity.class ) ) {
       @SuppressWarnings( "unchecked" )
-      final List<AuthorizationEntity> authorizations = ( List<AuthorizationEntity> ) db
+      final List<AuthorizationEntity> authorizations = ( List<AuthorizationEntity> ) Entities
           .createCriteria( AuthorizationEntity.class ).add(
               Restrictions.and(
                   Restrictions.eq( "type", resourceType ),
@@ -319,8 +333,6 @@ public class DatabaseRoleProxy implements Role {
     } catch ( Exception e ) {
       Debugging.logError( LOG, e, "Failed to lookup quotas for user with ID " + getRoleId() + ", type=" + resourceType);
       throw new AuthException( "Failed to lookup quota", e );
-    } finally {
-      if ( db.isActive() ) db.rollback();
     }
   }
 
@@ -348,7 +360,12 @@ public class DatabaseRoleProxy implements Role {
     }
   }
 
-  private RoleEntity getRoleEntity( final EntityWrapper<RoleEntity> db ) throws Exception {
-    return DatabaseAuthUtils.getUnique( db, RoleEntity.class, "roleId", getRoleId() );
+  private RoleEntity getRoleEntity( ) throws Exception {
+    return DatabaseAuthUtils.getUnique( RoleEntity.class, "roleId", getRoleId() );
+  }
+
+  private void readObject( ObjectInputStream in) throws IOException, ClassNotFoundException {
+    in.defaultReadObject( );
+    this.accountNumberSupplier = DatabaseAuthUtils.getAccountNumberSupplier( this );
   }
 }

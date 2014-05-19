@@ -1,5 +1,5 @@
 /*************************************************************************
- * Copyright 2009-2012 Eucalyptus Systems, Inc.
+ * Copyright 2009-2014 Eucalyptus Systems, Inc.
  *
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -62,18 +62,17 @@
 
 package com.eucalyptus.cloud;
 
+import static com.eucalyptus.cloud.VmInstanceLifecycleHelpers.NetworkResourceVmInstanceLifecycleHelper;
 import java.util.Calendar;
 import java.util.Date;
 import java.util.Map;
-import java.util.UUID;
 
 import javax.annotation.Nullable;
 
 import org.apache.log4j.Logger;
 
-import com.eucalyptus.address.Address;
 import com.eucalyptus.blockstorage.Volume;
-import com.eucalyptus.cloud.CloudMetadata.VmInstanceMetadata;
+import com.eucalyptus.compute.common.CloudMetadata.VmInstanceMetadata;
 import com.eucalyptus.cloud.run.Allocations.Allocation;
 import com.eucalyptus.cluster.Cluster;
 import com.eucalyptus.cluster.Clusters;
@@ -81,9 +80,11 @@ import com.eucalyptus.cluster.ResourceState.NoSuchTokenException;
 import com.eucalyptus.component.ServiceConfiguration;
 import com.eucalyptus.component.Topology;
 import com.eucalyptus.component.id.ClusterController;
-import com.eucalyptus.network.ExtantNetwork;
-import com.eucalyptus.network.PrivateNetworkIndex;
+import com.eucalyptus.compute.common.network.Networking;
+import com.eucalyptus.compute.common.network.ReleaseNetworkResourcesType;
 import com.eucalyptus.util.OwnerFullName;
+import com.eucalyptus.util.TypedContext;
+import com.eucalyptus.util.TypedKey;
 import com.eucalyptus.vm.VmInstance;
 import com.eucalyptus.vmtypes.VmTypes;
 import com.google.common.collect.Maps;
@@ -100,22 +101,15 @@ public class ResourceToken implements VmInstanceMetadata, Comparable<ResourceTok
   private Map<String, Volume> ebsVolumes;
   @Nullable
   private Map<String, String> ephemeralDisks;
-  @Nullable
-  private Address             address;
-  @Nullable
-  private ExtantNetwork       extantNetwork;
-  @Nullable
-  private PrivateNetworkIndex networkIndex;
+  private final TypedContext  resourceContext = TypedContext.newTypedContext( );
   private final Date          creationTime;
-  private final Integer       resourceAllocationSequenceNumber;
-  private final Integer       amount = 1;
   @Nullable
   private VmInstance          vmInst;
   private final Cluster       cluster;
   private boolean             aborted;
   private final boolean       unorderedType;
-  
-  public ResourceToken( final Allocation allocInfo, final int resourceAllocationSequenceNumber, final int launchIndex ) {
+
+  public ResourceToken( final Allocation allocInfo, final int launchIndex ) {
     this.allocation = allocInfo;
     this.launchIndex = launchIndex;
     this.instanceId = allocInfo.getInstanceId( launchIndex );
@@ -123,7 +117,6 @@ public class ResourceToken implements VmInstanceMetadata, Comparable<ResourceTok
     if ( this.instanceId == null || this.instanceUuid == null ) {
       throw new IllegalArgumentException( "Cannot create resource token with null instance id or uuid: " + allocInfo );
     }
-    this.resourceAllocationSequenceNumber = resourceAllocationSequenceNumber;
     this.creationTime = Calendar.getInstance( ).getTime( );
     ServiceConfiguration config = Topology.lookup( ClusterController.class, this.getAllocationInfo( ).getPartition( ) );
     this.cluster = Clusters.lookup( config );
@@ -138,20 +131,12 @@ public class ResourceToken implements VmInstanceMetadata, Comparable<ResourceTok
     return this.instanceId;
   }
   
-  public Address getAddress( ) {
-    return this.address;
-  }
-  
   public Integer getAmount( ) {
-    return this.amount;
+    return 1;
   }
   
   public Date getCreationTime( ) {
     return this.creationTime;
-  }
-  
-  public Integer getSequenceNumber( ) {
-    return this.resourceAllocationSequenceNumber;
   }
   
   @Override
@@ -163,44 +148,53 @@ public class ResourceToken implements VmInstanceMetadata, Comparable<ResourceTok
     return this.instanceUuid;
   }
   
-  public PrivateNetworkIndex getNetworkIndex( ) {
-    return this.networkIndex != null
-                                    ? this.networkIndex
-                                    : PrivateNetworkIndex.bogus( );
-  }
-  
   public Integer getLaunchIndex( ) {
     return this.launchIndex;
   }
-  
+
+  public <T> T getAttribute( final TypedKey<T> key ) {
+    return resourceContext.get( key );
+  }
+
+  public <T> T setAttribute( final TypedKey<T> key, final T value ) {
+    return resourceContext.put( key, value );
+  }
+
+  public <T> T removeAttribute( final TypedKey<T> key ) {
+    return resourceContext.remove( key );
+  }
+
   public void abort( ) {
     if ( aborted ) return;
     aborted = true;
 
     LOG.debug( this );
-    try {
-      this.release( );
-    } catch ( final Exception ex ) {
-      LOG.error( ex, ex );
-    }
-    if ( this.networkIndex != null ) {
+    if ( isPending( ) ) { // release unused resources
       try {
-        this.networkIndex.release( );
-      } catch ( Exception ex ) {
+        this.release( );
+      } catch ( final Exception ex ) {
         LOG.error( ex, ex );
       }
-    }
-    if ( this.address != null ) {
+
       try {
-        this.address.release( );
-      } catch ( Exception ex ) {
+        final ReleaseNetworkResourcesType releaseNetworkResourcesType = new ReleaseNetworkResourcesType( );
+        releaseNetworkResourcesType.getResources( ).addAll( getAttribute( NetworkResourceVmInstanceLifecycleHelper.NetworkResourcesKey ) );
+        Networking.getInstance( ).release( releaseNetworkResourcesType );
+      } catch ( final Exception ex ) {
         LOG.error( ex, ex );
       }
-    }
-    if ( this.vmInst != null ) {
+
+      if ( this.vmInst != null ) {
+        try {
+          this.vmInst.release( );
+        } catch ( Exception ex ) {
+          LOG.error( ex, ex );
+        }
+      }
+    } else { // redeem and release later (if not used)
       try {
-        this.vmInst.release( );
-      } catch ( Exception ex ) {
+        this.redeem( );
+      } catch ( final Exception ex ) {
         LOG.error( ex, ex );
       }
     }
@@ -240,10 +234,6 @@ public class ResourceToken implements VmInstanceMetadata, Comparable<ResourceTok
     return this.allocation;
   }
   
-  Integer getResourceAllocationSequenceNumber( ) {
-    return this.resourceAllocationSequenceNumber;
-  }
-  
   public void submit( ) throws NoSuchTokenException {
     this.cluster.getNodeState( ).submitToken( this );
   }
@@ -259,22 +249,6 @@ public class ResourceToken implements VmInstanceMetadata, Comparable<ResourceTok
   public boolean isPending( ) {
     return this.cluster.getNodeState( ).isPending( this );
   }
-
-  public void setNetworkIndex( PrivateNetworkIndex networkIndex ) {
-    this.networkIndex = networkIndex;
-  }
-  
-  public void setAddress( Address address ) {
-    this.address = address;
-  }
-  
-  public void setExtantNetwork( ExtantNetwork exNet ) {
-    this.extantNetwork = exNet;
-  }
-  
-  public ExtantNetwork getExtantNetwork( ) {
-    return this.extantNetwork;
-  }
   
   @Override
   public String toString( ) {
@@ -283,15 +257,7 @@ public class ResourceToken implements VmInstanceMetadata, Comparable<ResourceTok
     if ( this.instanceId != null ) {
       builder.append( this.instanceId ).append( ":" );
     }
-    if ( this.address != null ) {
-      builder.append( this.address.getName( ) ).append( ":" );
-    }
-    if ( this.extantNetwork != null ) {
-      builder.append( "tag=" ).append( this.extantNetwork.getTag( ) ).append( ":" );
-    }
-    if ( this.networkIndex != null ) {
-      builder.append( "idx=" ).append( this.networkIndex.getIndex( ) );
-    }
+    builder.append( "resources=" ).append( resourceContext );
     return builder.toString( );
   }
   

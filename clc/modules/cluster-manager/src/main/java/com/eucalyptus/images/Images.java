@@ -1,5 +1,5 @@
 /*************************************************************************
- * Copyright 2009-2012 Eucalyptus Systems, Inc.
+ * Copyright 2009-2014 Eucalyptus Systems, Inc.
  *
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -73,12 +73,10 @@ import java.util.NoSuchElementException;
 import java.util.Set;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
-import java.util.regex.Pattern;
 
 import javax.annotation.Nullable;
 import javax.persistence.EntityTransaction;
 
-import org.apache.commons.lang.RandomStringUtils;
 import org.apache.commons.lang.StringUtils;
 import org.apache.log4j.Logger;
 import org.hibernate.exception.ConstraintViolationException;
@@ -86,25 +84,24 @@ import org.hibernate.exception.ConstraintViolationException;
 import com.eucalyptus.auth.Accounts;
 import com.eucalyptus.auth.AuthException;
 import com.eucalyptus.auth.principal.AccessKey;
-import com.eucalyptus.auth.principal.Account;
-import com.eucalyptus.auth.principal.User;
 import com.eucalyptus.auth.principal.UserFullName;
 import com.eucalyptus.blockstorage.Snapshot;
 import com.eucalyptus.bootstrap.Bootstrap;
 import com.eucalyptus.bootstrap.Databases;
-import com.eucalyptus.cloud.CloudMetadatas;
-import com.eucalyptus.cloud.ImageMetadata;
-import com.eucalyptus.cloud.ImageMetadata.State;
-import com.eucalyptus.cloud.ImageMetadata.StaticDiskImage;
+import com.eucalyptus.compute.common.CloudMetadatas;
+import com.eucalyptus.compute.common.ImageMetadata;
+import com.eucalyptus.compute.common.ImageMetadata.State;
+import com.eucalyptus.compute.common.ImageMetadata.StaticDiskImage;
 import com.eucalyptus.cloud.util.MetadataException;
 import com.eucalyptus.component.Topology;
 import com.eucalyptus.component.id.Eucalyptus;
+import com.eucalyptus.compute.identifier.ResourceIdentifiers;
 import com.eucalyptus.context.Context;
 import com.eucalyptus.context.Contexts;
-import com.eucalyptus.crypto.Crypto;
 import com.eucalyptus.entities.Entities;
 import com.eucalyptus.entities.TransactionException;
 import com.eucalyptus.entities.TransactionExecutionException;
+import com.eucalyptus.entities.TransactionResource;
 import com.eucalyptus.entities.Transactions;
 import com.eucalyptus.event.EventListener;
 import com.eucalyptus.event.Hertz;
@@ -144,8 +141,7 @@ public class Images {
   static final String   SELF = "self";
   public static final String DEFAULT_ROOT_DEVICE = "/dev/sda";
   public static final String DEFAULT_PARTITIONED_ROOT_DEVICE = "/dev/sda1";
-  public static final Pattern IMAGE_ID_PATTERN = Pattern.compile( "(emi-|eki-|eri-)[0-9A-F]{8}" );
-  
+
   public static Predicate<ImageInfo> filterExecutableBy( final Collection<String> executableSet ) {
     final boolean executableSelf = executableSet.remove( SELF );
     final boolean executableAll = executableSet.remove( "all" );
@@ -170,7 +166,7 @@ public class Images {
 	  INSTANCE;
 	  @Override
 	  public boolean apply( ImageInfo input ) {
-		  if (ImageMetadata.State.available.equals(input.getState()))
+		  if (ImageMetadata.State.available.name().equals(input.getState().getExternalStateName()))
 			  return true;
 		  else
 			  return false;
@@ -184,7 +180,7 @@ public class Images {
     public boolean apply( ImageInfo input ) {
       try {
         Context ctx = Contexts.lookup( );
-        if ( ctx.hasAdministrativePrivileges( ) ) {
+        if ( ctx.isAdministrator( ) ) {
           return true;
         } else {
           UserFullName luser = ctx.getUserFullName( );
@@ -238,7 +234,7 @@ public class Images {
       i.setImageId( arg0.getDisplayName( ) );
       i.setImageLocation( arg0.getManifestLocation( ) );
       i.setImageOwnerId( arg0.getOwnerAccountNumber( ).toString( ) );//TODO:GRZE:verify imageOwnerAlias
-      i.setImageState( arg0.getState( ).toString( ) );
+      i.setImageState( arg0.getState( ).getExternalStateName() );
       i.setImageType( arg0.getImageType( ).toString( ) );
       i.setIsPublic( arg0.getImagePublic( ) );
       i.setPlatform( ImageMetadata.Platform.linux.toString( ) );
@@ -264,7 +260,7 @@ public class Images {
       i.setImageId( arg0.getDisplayName( ) );
       i.setImageLocation( arg0.getManifestLocation( ) );
       i.setImageOwnerId( arg0.getOwnerAccountNumber( ).toString( ) );//TODO:GRZE:verify imageOwnerAlias
-      i.setImageState( arg0.getState( ).toString( ) );
+      i.setImageState( arg0.getState().getExternalStateName() );
       i.setImageType( arg0.getImageType( ).toString( ) );
       i.setIsPublic( arg0.getImagePublic( ) );
       i.setPlatform( ImageMetadata.Platform.linux.toString( ) );
@@ -292,7 +288,7 @@ public class Images {
       i.setImageId( arg0.getDisplayName() );
       i.setImageLocation( arg0.getOwnerAccountNumber( ) + "/" + arg0.getImageName( ) );
       i.setImageOwnerId( arg0.getOwnerAccountNumber( ).toString() );//TODO:GRZE:verify imageOwnerAlias
-      i.setImageState( arg0.getState( ).toString( ) );
+      i.setImageState( arg0.getState( ).getExternalStateName() );
       i.setImageType( arg0.getImageType( ).toString( ) );
       i.setIsPublic( arg0.getImagePublic( ) );
       i.setImageType( arg0.getImageType( ).toString( ) );
@@ -327,9 +323,8 @@ public class Images {
       i.setRootDeviceType( arg0.getRootDeviceType() );
       i.setImageId( arg0.getDisplayName() );
       i.setImageLocation( arg0.getManifestLocation( ) );
-      i.setImageLocation( arg0.getManifestLocation( ) );
       i.setImageOwnerId( arg0.getOwnerAccountNumber( ).toString() );//TODO:GRZE:verify imageOwnerAlias
-      i.setImageState( arg0.getState( ).toString( ) );
+      i.setImageState( arg0.getState( ).getExternalStateName() );
       i.setImageType( arg0.getImageType( ).toString( ) );
       i.setIsPublic( arg0.getImagePublic( ) );
       i.setImageType( arg0.getImageType( ).toString( ) );
@@ -397,11 +392,12 @@ public class Images {
         if ( isEbsMapping( input ) ) {
           final EbsDeviceMapping ebsInfo = input.getEbs( );
           Integer size = -1;
+          final String snapshotId = ResourceIdentifiers.tryNormalize( ).apply( ebsInfo.getSnapshotId( ) );
           if ( ebsInfo.getVolumeSize() != null ) {
             size = ebsInfo.getVolumeSize();
           } else if ( ebsInfo.getSnapshotId() != null ){
             try {
-              Snapshot snap = Transactions.find( Snapshot.named( null, ebsInfo.getSnapshotId( ) ) );
+              Snapshot snap = Transactions.find( Snapshot.named( null, snapshotId ) );
               size = snap.getVolumeSize( );
               if ( ebsInfo.getVolumeSize( ) != null && ebsInfo.getVolumeSize( ) >= snap.getVolumeSize( ) ) {
                 size = ebsInfo.getVolumeSize( );
@@ -418,7 +414,7 @@ public class Images {
           final String mappedDeviceName = deviceNameMap.containsKey( input.getDeviceName() ) ?
               deviceNameMap.get( input.getDeviceName() ) :
               input.getDeviceName();
-          return new BlockStorageDeviceMapping( parent, mappedDeviceName, input.getEbs( ).getVirtualName( ), ebsInfo.getSnapshotId( ), size, ebsInfo.getDeleteOnTermination( ) );
+          return new BlockStorageDeviceMapping( parent, mappedDeviceName, input.getEbs( ).getVirtualName( ), snapshotId, size, ebsInfo.getDeleteOnTermination( ) );
         } else if ( input.getVirtualName( ) != null ) {
           return new EphemeralDeviceMapping( parent, input.getDeviceName( ), input.getVirtualName( ) );
         } else {
@@ -533,7 +529,7 @@ public class Images {
           if ( ebsInfo.getSnapshotId() != null ) {
             final Snapshot snap;
             try {
-              snap = Transactions.find( Snapshot.named( null, ebsInfo.getSnapshotId( ) ) );
+              snap = Transactions.find( Snapshot.named( null, ResourceIdentifiers.tryNormalize( ).apply( ebsInfo.getSnapshotId( ) ) ) );
             } catch ( Exception ex ) {
               LOG.error("Failed to find snapshot " + ebsInfo.getSnapshotId(), ex);
               throw new MetadataException("Unable to find snapshot " + ebsInfo.getSnapshotId() + " in the block device mapping for " + bdm.getDeviceName());
@@ -555,7 +551,7 @@ public class Images {
   public static boolean isImageNameValid(final String imgName){
 	if(imgName==null)
 		return false;
-	if (!imgName.matches("[A-Za-z0-9(),/_-]+"))
+	if (!imgName.matches("[A-Za-z0-9()./_-]+"))
 		return false;
 	
 	if (imgName.length() < 3 || imgName.length() > 128)
@@ -639,7 +635,16 @@ public class Images {
     		  ImageMetadata.State.failed.equals( img.getState())) {
         Entities.delete( img );
       } else {
-        img.setState( ImageMetadata.State.deregistered );
+        if( img instanceof MachineImageInfo){
+          final String runManifestLocation = ((MachineImageInfo)img).getRunManifestLocation();
+          final String manifestLocation = ((MachineImageInfo)img).getManifestLocation();
+          // cleanup system generated buckets if exist
+          if(!manifestLocation.equals(runManifestLocation))
+            img.setState(ImageMetadata.State.deregistered_cleanup);
+          else
+            img.setState( ImageMetadata.State.deregistered );
+        } else
+          img.setState( ImageMetadata.State.deregistered );
       }
       tx.commit( );
       if ( img instanceof ImageMetadata.StaticDiskImage ) {
@@ -682,11 +687,41 @@ public class Images {
   public static KernelImageInfo exampleKernelWithImageId( final String imageId ) {
     return new KernelImageInfo( imageId );
   }
+
+  public static KernelImageInfo lookupKernel( final String kernelId ) {
+    EntityTransaction tx = Entities.get( KernelImageInfo.class );
+    KernelImageInfo ret = new KernelImageInfo(  );
+    try {
+      ret = Entities.uniqueResult( Images.exampleKernelWithImageId( kernelId ) );
+      tx.commit( );
+    } catch ( Exception e ) {
+      LOG.error( "Kernel '" + kernelId + "' does not exist" + e );
+      throw new NoSuchElementException( "InvalidAMIID.NotFound" );
+    } finally {
+      if ( tx.isActive( ) ) tx.rollback( );
+    }
+    return ret;
+  }
   
   public static RamdiskImageInfo exampleRamdiskWithImageId( final String imageId ) {
     return new RamdiskImageInfo( imageId );
   }
-  
+
+  public static RamdiskImageInfo lookupRamdisk( final String ramdiskId ) {
+    EntityTransaction tx = Entities.get( RamdiskImageInfo.class );
+    RamdiskImageInfo ret = new RamdiskImageInfo(  );
+    try {
+      ret = Entities.uniqueResult( Images.exampleRamdiskWithImageId( ramdiskId ) );
+      tx.commit( );
+    } catch ( Exception e ) {
+      LOG.error( "Ramdisk '" + ramdiskId + "' does not exist" + e );
+      throw new NoSuchElementException( "InvalidAMIID.NotFound" );
+    } finally {
+      if ( tx.isActive( ) ) tx.rollback( );
+    }
+    return ret;
+  }
+
   public static ImageInfo lookupImage( String imageId ) {
     final EntityTransaction db = Entities.get(ImageInfo.class);
     try{
@@ -720,6 +755,14 @@ public class Images {
   public static ImageInfo exampleWithImageState( final ImageMetadata.State state ) {
     final ImageInfo img = new ImageInfo( );
     img.setState( state );
+    img.setStateChangeStack( null );
+    img.setLastState( null );
+    return img;
+  }
+  
+  public static ImageInfo exampleWithImageFormat( final ImageMetadata.ImageFormat format ) {
+    final ImageInfo img = new ImageInfo( );
+    img.setImageFormat(format.toString());
     img.setStateChangeStack( null );
     img.setLastState( null );
     return img;
@@ -787,16 +830,17 @@ public class Images {
       final UserFullName userFullName,
       final String imageName,
       final String imageDescription,
-            String eki,
-      final String eri,
+      final ImageMetadata.Platform platform,
+      String eki,
+      String eri,
       final String rootDeviceName, 
       final List<BlockDeviceMappingItemType> blockDeviceMappings 
   ) throws EucalyptusCloudException {
     final ImageMetadata.Architecture imageArch = ImageMetadata.Architecture.x86_64;//TODO:GRZE:OMGFIXME: track parent vol info; needed here 
-    ImageMetadata.Platform imagePlatform = ImageMetadata.Platform.linux;
-    if ( ImageMetadata.Platform.windows.name( ).equals( eki ) ) {
-      imagePlatform = ImageMetadata.Platform.windows;
+    final ImageMetadata.Platform imagePlatform = platform;
+    if(ImageMetadata.Platform.windows.equals(imagePlatform)){
       eki = null;
+      eri = null;
     }
     // Block device mappings have been verified before control gets here. 
     // If anything has changed with regard to the snapshot state, it will be caught while data structures for the image.
@@ -805,7 +849,7 @@ public class Images {
       throw new EucalyptusCloudException( "Failed to create image, root device mapping not found: " + rootDeviceName );
     }
 
-    final String snapshotId = rootBlockDevice.getEbs( ).getSnapshotId( );
+    final String snapshotId = ResourceIdentifiers.tryNormalize( ).apply( rootBlockDevice.getEbs( ).getSnapshotId( ) );
     Snapshot snap;
     try {
       snap = Transactions.one(
@@ -824,7 +868,7 @@ public class Images {
     final Integer suppliedVolumeSize = rootBlockDevice.getEbs().getVolumeSize() != null ? rootBlockDevice.getEbs().getVolumeSize() : snap.getVolumeSize();
     final Long imageSizeBytes = suppliedVolumeSize * 1024l * 1024l * 1024l;
     final Boolean targetDeleteOnTermination = Boolean.TRUE.equals( rootBlockDevice.getEbs( ).getDeleteOnTermination( ) );
-    final String imageId = Crypto.generateId( snapshotId, ImageMetadata.Type.machine.getTypePrefix( ) );
+    final String imageId = ResourceIdentifiers.generateString( ImageMetadata.Type.machine.getTypePrefix() );
 
     final boolean mapRoot = DEFAULT_PARTITIONED_ROOT_DEVICE.equals( rootDeviceName );
     BlockStorageImageInfo ret = new BlockStorageImageInfo( userFullName, imageId, imageName, imageDescription, imageSizeBytes,
@@ -842,6 +886,7 @@ public class Images {
               mapRoot ?
                   Collections.singletonMap( DEFAULT_PARTITIONED_ROOT_DEVICE, DEFAULT_ROOT_DEVICE ) :
                   Collections.<String,String>emptyMap( )) ) );
+      ret.setImageFormat(ImageMetadata.ImageFormat.fulldisk.toString());
       ret.setState( ImageMetadata.State.available );
       tx.commit( );
       LOG.info( "Registering image pk=" + ret.getDisplayName( ) + " ownerId=" + userFullName );
@@ -862,7 +907,7 @@ public class Images {
 		  final List<BlockDeviceMappingItemType> blockDeviceMappings
 		  ) throws Exception {
 
-	  final String imageId = Crypto.generateId( RandomStringUtils.random(10), ImageMetadata.Type.machine.getTypePrefix( ));
+	  final String imageId = ResourceIdentifiers.generateString( ImageMetadata.Type.machine.getTypePrefix() );
 	  BlockStorageImageInfo ret = new BlockStorageImageInfo( creator, imageId, imageNameArg, imageDescription, 
 			  new Long(-1), requestArch, imagePlatform, null, null, "snap-EUCARESERVED", false, Images.DEFAULT_ROOT_DEVICE ); 
 	  /// device with snap-EUCARESERVED is the placeholder to indicate register is for create-image only
@@ -879,6 +924,7 @@ public class Images {
 	  try {
 		  ret = Entities.merge( ret );
 		  ret.setState(ImageMetadata.State.pending);
+      ret.setImageFormat(ImageMetadata.ImageFormat.fulldisk.toString());
 	      ret.getDeviceMappings( ).addAll( Lists.transform( blockDeviceMappings, Images.deviceMappingGenerator( ret, -1 ) ) );
 		  tx.commit( );
 		  LOG.info( "Registering image pk=" + ret.getDisplayName( ) + " ownerId=" + creator );
@@ -905,7 +951,7 @@ public class Images {
 	  // Block device mappings have been verified before control gets here. 
 	  // If anything has changed with regard to the snapshot state, it will be caught while data structures for the image.
 	  final BlockDeviceMappingItemType rootBlockDevice = Iterables.find( blockDeviceMappings, findEbsRoot( rootDeviceName ) );
-	  final String snapshotId = rootBlockDevice.getEbs( ).getSnapshotId( );
+	  final String snapshotId = ResourceIdentifiers.tryNormalize( ).apply( rootBlockDevice.getEbs( ).getSnapshotId( ) );
 	  try {
 		  Snapshot snap = Transactions.find( Snapshot.named( userFullName, snapshotId ) );
 		  if ( !userFullName.getUserId( ).equals( snap.getOwnerUserId( ) ) ) {
@@ -927,6 +973,7 @@ public class Images {
 			  ret.setSnapshotId(snap.getDisplayName());
 			  ret.setDeleteOnTerminate(targetDeleteOnTermination);
 			  ret.setImageSizeBytes(imageSizeBytes);
+			  ret.setRootDeviceName(rootDeviceName);
 			  ret.setState( ImageMetadata.State.available );
 			  Entities.persist(ret);
 			  tx.commit( );
@@ -949,25 +996,30 @@ public class Images {
                                                 String imageDescription,
                                                 ImageMetadata.Architecture requestArch,
                                                 ImageMetadata.VirtualizationType virtType,
+                                                ImageMetadata.Platform platform,
+                                                ImageMetadata.ImageFormat imgFormat,
                                                 String eki,
                                                 String eri,
                                                 ImageManifest manifest ) throws Exception {
-    PutGetImageInfo ret = prepareFromManifest( creator, imageNameArg, imageDescription, requestArch, virtType, eki, eri, manifest );
+    PutGetImageInfo ret = prepareFromManifest( creator, imageNameArg, imageDescription, requestArch, virtType, platform, imgFormat, eki, eri, manifest );
     ret.setState( ImageMetadata.State.available );
     ret = persistRegistration( creator, manifest, ret );
     return ret;
   }
   
-  public static ImageInfo createPendingFromManifest( UserFullName creator,
+  public static ImageInfo createPendingAvailableFromManifest( UserFullName creator,
                                                      String imageNameArg,
                                                      String imageDescription,
                                                      ImageMetadata.Architecture requestArch,
                                                      ImageMetadata.VirtualizationType virtType,
+                                                     ImageMetadata.Platform platform,
+                                                     ImageMetadata.ImageFormat imgFormat,
                                                      String eki,
                                                      String eri,
                                                      ImageManifest manifest ) throws Exception {
-    PutGetImageInfo ret = prepareFromManifest( creator, imageNameArg, imageDescription, requestArch, virtType, eki, eri, manifest );
-    ret.setState( ImageMetadata.State.hidden );
+    PutGetImageInfo ret = prepareFromManifest( creator, imageNameArg, imageDescription, requestArch, 
+        virtType, platform, imgFormat, eki, eri, manifest );
+    ret.setState( ImageMetadata.State.pending_available );
     ret = persistRegistration( creator, manifest, ret );
     return ret;
   }
@@ -989,6 +1041,8 @@ public class Images {
                                                       String imageDescription,
                                                       ImageMetadata.Architecture requestArch,
                                                       ImageMetadata.VirtualizationType virtType, 
+                                                      ImageMetadata.Platform platform,
+                                                      ImageMetadata.ImageFormat format,
                                                       String eki,
                                                       String eri,
                                                       ImageManifest manifest ) throws Exception {
@@ -999,27 +1053,21 @@ public class Images {
     eki = ( eki != null )
       ? eki
       : manifest.getKernelId( );
-    eki = ( eki != null )
-      ? eki
-      : ImageConfiguration.getInstance( ).getDefaultKernelId( );
     eri = ( eri != null )
       ? eri
       : manifest.getRamdiskId( );
-    eri = ( eri != null )
-      ? eri
-      : ImageConfiguration.getInstance( ).getDefaultRamdiskId( );
     ImageMetadata.Architecture imageArch = ( requestArch != null )
       ? requestArch
       : manifest.getArchitecture( );
-    ImageMetadata.Platform imagePlatform = manifest.getPlatform( );    
+    final ImageMetadata.Platform imagePlatform = platform;    
     switch ( manifest.getImageType( ) ) {
       case kernel:
-        ret = new KernelImageInfo( creator, Crypto.generateId( manifest.getImageLocation( ), ImageMetadata.Type.kernel.getTypePrefix( ) ),
+        ret = new KernelImageInfo( creator, ResourceIdentifiers.generateString( ImageMetadata.Type.kernel.getTypePrefix() ),
                                    imageName, imageDescription, manifest.getSize( ), imageArch, imagePlatform,
                                     manifest.getImageLocation( ), manifest.getBundledSize( ), manifest.getChecksum( ), manifest.getChecksumType( ) );
         break;
       case ramdisk:
-        ret = new RamdiskImageInfo( creator, Crypto.generateId( manifest.getImageLocation( ), ImageMetadata.Type.ramdisk.getTypePrefix( ) ),
+        ret = new RamdiskImageInfo( creator, ResourceIdentifiers.generateString( ImageMetadata.Type.ramdisk.getTypePrefix() ),
                                     imageName, imageDescription, manifest.getSize( ), imageArch, imagePlatform,
                                     manifest.getImageLocation( ), manifest.getBundledSize( ), manifest.getChecksum( ), manifest.getChecksumType( ) );
         break;
@@ -1027,14 +1075,15 @@ public class Images {
     	if(ImageMetadata.Platform.windows.equals(imagePlatform)){
     		  virtType = ImageMetadata.VirtualizationType.hvm;
     	}
-    	if(	ImageMetadata.VirtualizationType.hvm.equals(virtType) ){
-    	    	eki = null; 
-    	    	eri = null;
+    	
+    	ret = new MachineImageInfo( creator, ResourceIdentifiers.generateString( ImageMetadata.Type.machine.getTypePrefix() ),
+    	    imageName, imageDescription, manifest.getSize( ), imageArch, imagePlatform,
+    	    manifest.getImageLocation( ), manifest.getBundledSize( ), manifest.getChecksum( ), manifest.getChecksumType( ), eki, eri , virtType);
+    	ret.setImageFormat(format.toString());
+    	if( ImageMetadata.VirtualizationType.hvm.equals(virtType) ){
+    	  ((MachineImageInfo) ret).setRunManifestLocation(manifest.getImageLocation());
     	}
-        ret = new MachineImageInfo( creator, Crypto.generateId( manifest.getImageLocation( ), ImageMetadata.Type.machine.getTypePrefix( ) ),
-                                    imageName, imageDescription, manifest.getSize( ), imageArch, imagePlatform,
-                                    manifest.getImageLocation( ), manifest.getBundledSize( ), manifest.getChecksum( ), manifest.getChecksumType( ), eki, eri , virtType);
-        break;
+    	break;
     }
     if ( ret == null ) {
       throw new IllegalArgumentException( "Failed to prepare image using the provided image manifest: " + manifest );
@@ -1060,52 +1109,72 @@ public class Images {
 // imageInfo.addProductCode( p );
 // }
 // imageInfo.grantPermission( ctx.getAccount( ) );
-    maybeUpdateDefault( ret );
     LOG.info( "Triggering cache population in Walrus for: " + ret.getDisplayName( ) );
-    if ( ret instanceof ImageMetadata.StaticDiskImage ) {
-      StaticDiskImages.prepare( ret.getManifestLocation( ) );
+    if ( ret instanceof ImageMetadata.StaticDiskImage && ret.getRunManifestLocation()!=null) {
+      StaticDiskImages.prepare( ret.getRunManifestLocation( ) );
     }
     return ret;
-  }
-  
-  
-  private static void maybeUpdateDefault( PutGetImageInfo ret ) {
-    final String id = ret.getDisplayName();
-    if ( ImageMetadata.Type.kernel.equals( ret.getImageType( ) ) && ImageConfiguration.getInstance( ).getDefaultKernelId( ) == null ) {
-      try {
-        ImageConfiguration.modify( new Callback<ImageConfiguration>( ) {
-          @Override
-          public void fire( ImageConfiguration t ) {
-            t.setDefaultKernelId( id );
-          }
-        } );
-      } catch ( ExecutionException ex ) {
-        LOG.error( ex, ex );
-      }
-    } else if ( ImageMetadata.Type.ramdisk.equals( ret.getImageType( ) ) && ImageConfiguration.getInstance( ).getDefaultRamdiskId( ) == null ) {
-      try {
-        ImageConfiguration.modify( new Callback<ImageConfiguration>( ) {
-          @Override
-          public void fire( ImageConfiguration t ) {
-            t.setDefaultRamdiskId( id );
-          }
-        } );
-      } catch ( ExecutionException ex ) {
-        LOG.error( ex, ex );
-      }
-    }
   }
   
   public static ImageConfiguration configuration( ) {
     return ImageConfiguration.getInstance( );
   }
   
-  public static String lookupDefaultKernelId( ) {
-    return ImageConfiguration.getInstance( ).getDefaultKernelId( );
+
+  public static void setConversionTaskId(final String imageId, final String taskId){
+    try ( final TransactionResource db =
+        Entities.transactionFor( ImageInfo.class ) ) {
+      try{
+        final ImageInfo entity = Entities.uniqueResult(Images.exampleWithImageId(imageId));
+        ((MachineImageInfo)entity).setImageConversionId(taskId);
+        Entities.persist(entity);
+        db.commit();
+      }catch(final Exception ex){
+        throw Exceptions.toUndeclared(ex);
+      }
+    } 
   }
   
-  public static String lookupDefaultRamdiskId( ) {
-    return ImageConfiguration.getInstance( ).getDefaultRamdiskId( );
+  public static void setImageFormat(final String imageId, ImageMetadata.ImageFormat format){
+    try ( final TransactionResource db =
+        Entities.transactionFor( ImageInfo.class ) ) {
+      try{
+        final ImageInfo entity = Entities.uniqueResult(Images.exampleWithImageId(imageId));
+        entity.setImageFormat(format.toString());
+        Entities.persist(entity);
+        db.commit();
+      }catch(final Exception ex){
+        throw Exceptions.toUndeclared(ex);
+      }
+    }
+  }
+  
+  public static void setRunManifestLocation(final String imageId, final String runManifestLocation){
+    try ( final TransactionResource db =
+        Entities.transactionFor( ImageInfo.class ) ) {
+      try{
+        final ImageInfo entity = Entities.uniqueResult(Images.exampleWithImageId(imageId));
+        ((MachineImageInfo)entity).setRunManifestLocation(runManifestLocation);
+        Entities.persist(entity);
+        db.commit();
+      }catch(final Exception ex){
+        throw Exceptions.toUndeclared(ex);
+      }
+    }
+  }
+  
+  public static void setImageVirtualizationType(final String imageId, ImageMetadata.VirtualizationType virtType){
+    try ( final TransactionResource db =
+        Entities.transactionFor( ImageInfo.class ) ) {
+      try{
+        final ImageInfo entity = Entities.uniqueResult(Images.exampleWithImageId(imageId));
+        ((MachineImageInfo) entity).setVirtualizationType(virtType);
+        Entities.persist(entity);
+        db.commit();
+      }catch(final Exception ex){
+        throw Exceptions.toUndeclared(ex);
+      }
+    }
   }
 
   public static class ImageInfoFilterSupport extends FilterSupport<ImageInfo> {
@@ -1136,7 +1205,7 @@ public class Images {
           .withStringProperty( "state", FilterStringFunctions.STATE )
           .withUnsupportedProperty( "state-reason-code" )
           .withUnsupportedProperty( "state-reason-message" )
-          .withUnsupportedProperty( "virtualization-type" )
+          .withStringProperty( "virtualization-type", FilterStringFunctions.VIRTUALIZATION_TYPE )
           .withUnsupportedProperty( "hypervisor" )
           .withPersistenceAlias( "deviceMappings", "deviceMappings" )
           .withPersistenceFilter( "architecture", "architecture", Enums.valueOfFunction( ImageMetadata.Architecture.class ) )
@@ -1156,6 +1225,7 @@ public class Images {
           .withPersistenceFilter( "platform", "platform", Enums.valueOfFunction( ImageMetadata.Platform.class ) )
           .withPersistenceFilter( "ramdisk-id", "ramdiskId" )
           .withPersistenceFilter( "state", "state", Enums.valueOfFunction( ImageMetadata.State.class ) )
+          .withPersistenceFilter( "virtualization-type", "virtType", ImageMetadata.VirtualizationType.fromString( ) )
       );
     }
   }
@@ -1340,6 +1410,14 @@ public class Images {
       public String apply( final ImageInfo imageInfo ) {
         return Strings.toString( imageInfo.getState() );
       }
+    },
+    VIRTUALIZATION_TYPE {
+      @Override
+      public String apply( final ImageInfo imageInfo ) {
+        return imageInfo instanceof MachineImageInfo ?
+            Strings.toString( ((MachineImageInfo)imageInfo).getVirtualizationType() ) :
+            null;
+      }
     }
  }
 
@@ -1387,7 +1465,7 @@ public class Images {
   /**
    * Predicate matching images in a standard state.
    *
-   * @see com.eucalyptus.cloud.ImageMetadata.State#standardState( )
+   * @see com.eucalyptus.compute.common.ImageMetadata.State#standardState( )
    */
   public static Predicate<ImageInfo> standardStatePredicate( ) {
     return StandardStatePredicate.INSTANCE;

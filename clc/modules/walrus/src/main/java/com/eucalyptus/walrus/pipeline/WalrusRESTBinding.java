@@ -80,11 +80,8 @@ import java.util.concurrent.TimeUnit;
 
 import com.eucalyptus.auth.policy.key.Iso8601DateParser;
 import com.eucalyptus.component.ComponentIds;
+import com.eucalyptus.records.Logs;
 import com.eucalyptus.walrus.WalrusBackend;
-import com.eucalyptus.walrus.msgs.LifecycleConfigurationType;
-import com.eucalyptus.walrus.msgs.LifecycleExpiration;
-import com.eucalyptus.walrus.msgs.LifecycleRule;
-import com.eucalyptus.walrus.msgs.LifecycleTransition;
 
 import com.google.common.base.Strings;
 import net.sf.json.JSONArray;
@@ -175,13 +172,15 @@ public class WalrusRESTBinding extends RestfulMarshallingHandler {
 
 	@Override
 	public void handleUpstream( final ChannelHandlerContext channelHandlerContext, final ChannelEvent channelEvent ) throws Exception {
-		LOG.trace( LogUtil.dumpObject( channelEvent ) );
+		if(Logs.isExtrrreeeme()) {
+            Logs.extreme().trace( LogUtil.dumpObject( channelEvent ) );
+        }
 		if ( channelEvent instanceof MessageEvent ) {
 			final MessageEvent msgEvent = ( MessageEvent ) channelEvent;
 			try {
 				this.incomingMessage( channelHandlerContext, msgEvent );
 			} catch ( Exception e ) {
-				LOG.error( e, e );
+				LOG.warn("Error processing incoming message in Walrus Binding", e);
 				//throw e;
 				Channels.fireExceptionCaught( channelHandlerContext, e );
 				return;
@@ -288,9 +287,6 @@ public class WalrusRESTBinding extends RestfulMarshallingHandler {
 		newMap.put(BUCKET + WalrusProperties.HTTPVerb.GET.toString() + WalrusProperties.BucketParameter.versioning.toString(), "GetBucketVersioningStatus");
 		newMap.put(BUCKET + WalrusProperties.HTTPVerb.PUT.toString() + WalrusProperties.BucketParameter.versioning.toString(), "SetBucketVersioningStatus");
 
-		newMap.put(BUCKET + WalrusProperties.HTTPVerb.GET.toString() + WalrusProperties.BucketParameter.lifecycle.toString(), "GetLifecycle");
-		newMap.put(BUCKET + WalrusProperties.HTTPVerb.PUT.toString() + WalrusProperties.BucketParameter.lifecycle.toString(), "PutLifecycle");
-
 		//Object operations
 		newMap.put(OBJECT + WalrusProperties.HTTPVerb.GET.toString() + WalrusProperties.ObjectParameter.acl.toString(), "GetObjectAccessControlPolicy");
 		newMap.put(OBJECT + WalrusProperties.HTTPVerb.PUT.toString() + WalrusProperties.ObjectParameter.acl.toString(), "SetRESTObjectAccessControlPolicy");
@@ -328,8 +324,8 @@ public class WalrusRESTBinding extends RestfulMarshallingHandler {
 		opsMap.put(BUCKET + WalrusProperties.HTTPVerb.DELETE.toString() + WalrusProperties.BucketParameter.cors.toString(), "DELETE Bucket cors");
 
 		// Lifecycle
-		//opsMap.put(BUCKET + WalrusProperties.HTTPVerb.GET.toString() + WalrusProperties.BucketParameter.lifecycle.toString(), "GET Bucket lifecycle");
-		//opsMap.put(BUCKET + WalrusProperties.HTTPVerb.PUT.toString() + WalrusProperties.BucketParameter.lifecycle.toString(), "PUT Bucket lifecycle");
+		opsMap.put(BUCKET + WalrusProperties.HTTPVerb.GET.toString() + WalrusProperties.BucketParameter.lifecycle.toString(), "GET Bucket lifecycle");
+		opsMap.put(BUCKET + WalrusProperties.HTTPVerb.PUT.toString() + WalrusProperties.BucketParameter.lifecycle.toString(), "PUT Bucket lifecycle");
 		opsMap.put(BUCKET + WalrusProperties.HTTPVerb.DELETE.toString() + WalrusProperties.BucketParameter.lifecycle.toString(),"DELETE Bucket lifecycle");
 		// Policy
 		opsMap.put(BUCKET + WalrusProperties.HTTPVerb.GET.toString() + WalrusProperties.BucketParameter.policy.toString(), "GET Bucket policy");
@@ -421,7 +417,7 @@ public class WalrusRESTBinding extends RestfulMarshallingHandler {
 			throw new BindingException( errMsg.toString() );
 		}
 
-		LOG.debug(groovyMsg.toString());
+		LOG.trace(groovyMsg.toString());
 		try
 		{
 			Binding binding = BindingManager.getDefaultBinding( );
@@ -453,7 +449,7 @@ public class WalrusRESTBinding extends RestfulMarshallingHandler {
 		msg.setProperty("timeStamp", new Date());
 	}
 
-	protected String getOperation(MappingHttpRequest httpRequest, Map operationParams) throws BindingException, NotImplementedException {
+	protected String getOperation(MappingHttpRequest httpRequest, Map operationParams) throws Exception, NotImplementedException {
 		String[] target = null;
 		String path = getOperationPath(httpRequest);
 
@@ -669,7 +665,7 @@ public class WalrusRESTBinding extends RestfulMarshallingHandler {
                     operationParams.put("InlineData", Boolean.FALSE);
                     operationParams.put("GetMetaData", Boolean.TRUE);
                 } else if(verb.equals(WalrusProperties.HTTPVerb.POST.toString())) {
-					LOG.debug("Not sure what to do here");
+					//LOG.debug("Not sure what to do here");
 					if(params.containsKey("uploadId")) {
 						operationParams.put("Parts", getPartsList(httpRequest));
 					}
@@ -684,10 +680,6 @@ public class WalrusRESTBinding extends RestfulMarshallingHandler {
 
 		if (verb.equals(WalrusProperties.HTTPVerb.PUT.toString()) && params.containsKey(WalrusProperties.BucketParameter.acl.toString())) {
 			operationParams.put("AccessControlPolicy", getAccessControlPolicy(httpRequest));
-		}
-
-		if (verb.equals(WalrusProperties.HTTPVerb.PUT.toString()) && params.containsKey(WalrusProperties.BucketParameter.lifecycle.toString())) {
-			operationParams.put("lifecycle", getLifecycle(httpRequest));
 		}
 
 		ArrayList paramsToRemove = new ArrayList();
@@ -848,7 +840,6 @@ public class WalrusRESTBinding extends RestfulMarshallingHandler {
 				LoggingEnabled loggingEnabled = new LoggingEnabled(targetBucket, targetPrefix, new TargetGrants(grants));
 				operationParams.put("LoggingEnabled", loggingEnabled);
 			} catch(Exception ex) {
-				LOG.warn(ex);
 				throw new BindingException("Unable to parse logging configuration " + ex.getMessage());
 			}
 		}
@@ -864,98 +855,9 @@ public class WalrusRESTBinding extends RestfulMarshallingHandler {
 					return;
 				operationParams.put("VersioningStatus", status);
 			} catch(Exception ex) {
-				LOG.warn(ex);
 				throw new BindingException("Unable to parse versioning status " + ex.getMessage());
 			}
 		}
-	}
-
-	private LifecycleConfigurationType getLifecycle(MappingHttpRequest httpRequest) throws BindingException {
-		LifecycleConfigurationType lifecycleConfigurationType = new LifecycleConfigurationType();
-		lifecycleConfigurationType.setRules( new ArrayList<LifecycleRule>() );
-		String message = getMessageString(httpRequest);
-		if (message.length() > 0) {
-			try {
-				XMLParser xmlParser = new XMLParser(message);
-				DTMNodeList rules = xmlParser.getNodes("//LifecycleConfiguration/Rule");
-				if (rules == null) {
-					throw new BindingException("malformed lifecycle configuration");
-				}
-				for (int idx = 0; idx < rules.getLength(); idx++) {
-					lifecycleConfigurationType.getRules().add( extractLifecycleRule( xmlParser, rules.item(idx) ) );
-				}
-			}
-			catch (Exception ex) {
-				LOG.warn(ex);
-				throw new BindingException("Unable to parse lifecycle " + ex.getMessage());
-			}
-		}
-		return lifecycleConfigurationType;
-	}
-
-	private LifecycleRule extractLifecycleRule(XMLParser parser, Node node) throws BindingException{
-		LifecycleRule lifecycleRule = new LifecycleRule();
-		String id = parser.getValue(node, "ID");
-		String prefix = parser.getValue(node, "Prefix");
-		String status = parser.getValue(node, "Status");
-
-		lifecycleRule.setID(id);
-		lifecycleRule.setPrefix(prefix);
-		lifecycleRule.setStatus(status);
-
-		try {
-			LifecycleTransition transition = null;
-			String transitionDays = parser.getValue(node, "Transition/Days");
-			String transitionDate = parser.getValue(node, "Transition/Date");
-			if ( (transitionDays != null && !transitionDays.equals("")) ||
-					( transitionDate != null && !transitionDate.equals("") )) {
-				String storageClass = parser.getValue(node, "Transition/StorageClass");
-				if (transitionDays != null && !transitionDays.equals("")) {
-					transition = new LifecycleTransition();
-					Integer transitionDaysInt = new Integer( Integer.parseInt(transitionDays) );
-					transition.setDays(transitionDaysInt);
-				}
-				else if (transitionDate != null && !transitionDate.equals("")) {
-					transition = new LifecycleTransition();
-					Date transitionDateAsDate = Iso8601DateParser.parse(transitionDate);
-					transition.setDate(transitionDateAsDate);
-				}
-				if (transition != null) {
-					transition.setStorageClass(storageClass);
-				}
-			}
-			if (transition != null) {
-				lifecycleRule.setTransition(transition);
-			}
-
-			LifecycleExpiration expiration = null;
-			String expirationDays = parser.getValue(node, "Expiration/Days");
-			String expirationDate = parser.getValue(node, "Expiration/Date");
-			if ( (expirationDays != null && !expirationDays.equals("")) ||
-					( expirationDate != null && !expirationDate.equals("") )) {
-				if ( expirationDays != null && !expirationDays.equals("") ) {
-					expiration = new LifecycleExpiration();
-					Integer expirationDaysInt = new Integer( Integer.parseInt(expirationDays) );
-					expiration.setDays(expirationDaysInt);
-				}
-				else if ( expirationDate != null && !expirationDate.equals("") ) {
-					expiration = new LifecycleExpiration();
-					Date expirationDateAsDate = Iso8601DateParser.parse(expirationDate);
-					expiration.setDate(expirationDateAsDate);
-				}
-			}
-			if (expiration != null) {
-				lifecycleRule.setExpiration(expiration);
-			}
-		}
-		catch (ParseException e) {
-			throw new BindingException("caught a parsing exception while translating the transition or expiration date - " + e.getMessage());
-		}
-		catch (Exception ex) {
-			throw new BindingException("caught general exception while parsing lifecycle input - " + ex.getMessage());
-		}
-
-		return lifecycleRule;
 	}
 
 	private void parseExtendedHeaders(Map operationParams, String headerString, String value) throws BindingException {
@@ -984,8 +886,7 @@ public class WalrusRESTBinding extends RestfulMarshallingHandler {
 				try {
 					operationParams.put(headerString, DateUtils.parseIso8601DateTime(value));
 				} catch (ParseException e) {
-					LOG.error(e);
-					throw new BindingException(e);
+					throw new BindingException("Error parsing date value: " + value, e);
 				}
 			}
 		} else {
@@ -1049,8 +950,7 @@ public class WalrusRESTBinding extends RestfulMarshallingHandler {
 				}
 			}
 		} catch(Exception ex) {
-			LOG.warn(ex);
-			throw new BindingException("Unable to parse access control policy " + ex.getMessage());
+			throw new BindingException("Unable to parse access control policy", ex);
 		}
 		accessControlList.setGrants(grants);
 		accessControlPolicy.setAccessControlList(accessControlList);
@@ -1101,8 +1001,7 @@ public class WalrusRESTBinding extends RestfulMarshallingHandler {
 				}
 			}
 		} catch(Exception ex) {
-			LOG.warn(ex);
-			throw new BindingException("Unable to parse access control list " + ex.getMessage());
+			throw new BindingException("Unable to parse access control list", ex);
 		}
 		accessControlList.setGrants(grants);
 		return accessControlList;
@@ -1125,8 +1024,7 @@ public class WalrusRESTBinding extends RestfulMarshallingHandler {
 				}
 			}
 		}catch(Exception ex) {
-			LOG.warn(ex);
-			throw new BindingException("Unable to parse part list " + ex.getMessage());
+			throw new BindingException("Unable to parse part list", ex);
 		}
 		return partList;
 	}
@@ -1158,8 +1056,7 @@ public class WalrusRESTBinding extends RestfulMarshallingHandler {
 				locationConstraint = xmlParser.getValue("/CreateBucketConfiguration/LocationConstraint");
 			}
 		} catch(Exception ex) {
-			LOG.warn(ex);
-			throw new BindingException(ex.getMessage());
+			throw new BindingException("Error parsing location constraint", ex);
 		}
 		return locationConstraint;
 	}
@@ -1394,12 +1291,11 @@ public class WalrusRESTBinding extends RestfulMarshallingHandler {
 				while((putQueue != null) && (!putQueue.offer(WalrusDataMessage.EOF(), 1000, TimeUnit.MILLISECONDS)));
 			}
 		} catch (Exception ex) {
-			LOG.error(ex, ex);
+            throw new Exception("Error handling HTTP chunk", ex);
 		}
-
 	}
 
-	private void handleFirstChunk(MappingHttpRequest httpRequest, long dataLength) {
+	private void handleFirstChunk(MappingHttpRequest httpRequest, long dataLength) throws Exception {
 		ChannelBuffer buffer = httpRequest.getContent();
 		try {
 			putQueue.put(WalrusDataMessage.StartOfData(dataLength));
@@ -1410,12 +1306,12 @@ public class WalrusRESTBinding extends RestfulMarshallingHandler {
 			if(!httpRequest.isChunked())
 				putQueue.put(WalrusDataMessage.EOF());
 		} catch (Exception ex) {
-			LOG.error(ex, ex);
+            throw new Exception("Error handling first chunk of PUT in walrus", ex);
 		}
 
 	}
 
-	private void handleFirstChunk(MappingHttpRequest httpRequest, ChannelBuffer firstChunk, long dataLength) {
+	private void handleFirstChunk(MappingHttpRequest httpRequest, ChannelBuffer firstChunk, long dataLength) throws Exception {
 		try {
 			putQueue.put(WalrusDataMessage.StartOfData(dataLength));
 			byte[] read = new byte[firstChunk.readableBytes( )];
@@ -1424,7 +1320,7 @@ public class WalrusRESTBinding extends RestfulMarshallingHandler {
 			if(!httpRequest.isChunked())
 				putQueue.put(WalrusDataMessage.EOF());
 		} catch (Exception ex) {
-			LOG.error(ex, ex);
+            throw new Exception("Error handling first data chunk", ex);
 		}
 
 	}
@@ -1450,7 +1346,7 @@ public class WalrusRESTBinding extends RestfulMarshallingHandler {
 			byte[] bytes = new byte[DATA_MESSAGE_SIZE];
 
 			try {
-				LOG.info("Starting upload");                
+                Logs.extreme().trace("Starting upload");
 				putQueue.put(WalrusDataMessage.StartOfData(dataLength));
 
 				firstBuffer.markReaderIndex( );
@@ -1460,7 +1356,7 @@ public class WalrusRESTBinding extends RestfulMarshallingHandler {
 				//putQueue.put(WalrusDataMessage.EOF());
 
 			} catch (Exception ex) {
-				LOG.error(ex, ex);
+				LOG.error("Error putting data into internal transfer queue in Walrus", ex);
 			}
 		}
 

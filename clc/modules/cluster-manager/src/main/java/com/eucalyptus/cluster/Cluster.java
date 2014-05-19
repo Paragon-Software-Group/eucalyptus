@@ -83,9 +83,7 @@ import java.util.concurrent.LinkedBlockingDeque;
 import java.util.concurrent.ThreadFactory;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
-import java.util.concurrent.locks.Lock;
 import java.util.concurrent.locks.ReadWriteLock;
-import java.util.concurrent.locks.ReentrantLock;
 import java.util.concurrent.locks.ReentrantReadWriteLock;
 import javax.annotation.Nullable;
 
@@ -95,8 +93,8 @@ import org.apache.log4j.Logger;
 import com.eucalyptus.auth.principal.Principals;
 import com.eucalyptus.bootstrap.Bootstrap;
 import com.eucalyptus.bootstrap.Hosts;
-import com.eucalyptus.cloud.CloudMetadata.AvailabilityZoneMetadata;
-import com.eucalyptus.cloud.CloudMetadatas;
+import com.eucalyptus.compute.common.CloudMetadata.AvailabilityZoneMetadata;
+import com.eucalyptus.compute.common.CloudMetadatas;
 import com.eucalyptus.cluster.ResourceState.VmTypeAvailability;
 import com.eucalyptus.cluster.callback.ClusterCertsCallback;
 import com.eucalyptus.cluster.callback.LogDataCallback;
@@ -126,7 +124,6 @@ import com.eucalyptus.event.EventListener;
 import com.eucalyptus.event.Hertz;
 import com.eucalyptus.event.ListenerRegistry;
 import com.eucalyptus.event.Listeners;
-import com.eucalyptus.node.Nodes;
 import com.eucalyptus.records.EventRecord;
 import com.eucalyptus.records.EventType;
 import com.eucalyptus.records.Logs;
@@ -149,7 +146,6 @@ import com.eucalyptus.util.async.SubjectMessageCallback;
 import com.eucalyptus.util.async.SubjectRemoteCallbackFactory;
 import com.eucalyptus.util.fsm.AbstractTransitionAction;
 import com.eucalyptus.util.fsm.Automata;
-import com.eucalyptus.util.fsm.ExistingTransitionException;
 import com.eucalyptus.util.fsm.HasStateMachine;
 import com.eucalyptus.util.fsm.StateMachine;
 import com.eucalyptus.util.fsm.StateMachineBuilder;
@@ -620,7 +616,7 @@ public class Cluster implements AvailabilityZoneMetadata, HasFullName<Cluster>, 
     this.configuration = configuration;
     this.state = null;
     this.nodeState = null;
-    this.nodeMap = null;
+    this.nodeMap = new ConcurrentSkipListMap<>( );
     this.stateMachine = null;
   }
 

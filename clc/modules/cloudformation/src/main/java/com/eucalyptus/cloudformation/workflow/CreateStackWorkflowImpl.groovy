@@ -1,3 +1,23 @@
+/*************************************************************************
+ * Copyright 2013-2014 Eucalyptus Systems, Inc.
+ *
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; version 3 of the License.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program.  If not, see http://www.gnu.org/licenses/.
+ *
+ * Please contact Eucalyptus Systems, Inc., 6755 Hollister Ave., Goleta
+ * CA 93117, USA or visit http://www.eucalyptus.com/licenses/ if you need
+ * additional information or have any questions.
+ ************************************************************************/
+
 package com.eucalyptus.cloudformation.workflow
 
 import com.amazonaws.services.simpleworkflow.flow.core.AndPromise
@@ -18,9 +38,6 @@ import com.netflix.glisten.impl.swf.SwfWorkflowOperations
 import groovy.transform.CompileStatic
 import groovy.transform.TypeCheckingMode;
 
-/**
- * Created by ethomas on 2/18/14.
- */
 @CompileStatic(TypeCheckingMode.SKIP)
 public class CreateStackWorkflowImpl implements CreateStackWorkflow {
   @Delegate
@@ -118,7 +135,7 @@ public class CreateStackWorkflowImpl implements CreateStackWorkflow {
             if (!failedResources.isEmpty()) {
               errorMessage = "The following resource(s) failed to create: " + failedResources + ".";
             }
-            if (onFailure == "DO_NOTHING") {
+            if ("DO_NOTHING".equals(onFailure)) {
               return promiseFor(activities.createGlobalStackEvent(
                 stackId,
                 accountId,
@@ -130,14 +147,14 @@ public class CreateStackWorkflowImpl implements CreateStackWorkflow {
                   activities.createGlobalStackEvent(
                     stackId,
                     accountId,
-                    onFailure == "ROLLBACK" ?
+                    "ROLLBACK".equals(onFailure) ?
                       StackResourceEntity.Status.ROLLBACK_IN_PROGRESS.toString() :
                       StackResourceEntity.Status.DELETE_IN_PROGRESS.toString(),
-                    errorMessage + (onFailure == "ROLLBACK" ? "Rollback" : "Delete") + " requested by user."
+                    errorMessage + ("ROLLBACK".equals(onFailure) ? "Rollback" : "Delete") + " requested by user."
                   )
                 );
                 waitFor(deleteOrRollbackEvent) {
-                  // Determine correct order for rollback/delete
+                  // Determine correct order for rollbackCreate/delete
                   Map<String, Settable<String>> deletedResourcePromiseMap = Maps.newConcurrentMap();
                   Map<String, ResourceStatus> deletedResourceStatusMap = Maps.newConcurrentMap();
                   for (String resourceName: resourceStatusMap.keySet()) {
@@ -174,7 +191,7 @@ public class CreateStackWorkflowImpl implements CreateStackWorkflow {
                         }
                       } // the assumption here is that the global resourceInfo map is up to date...
                       deletedResourceStatusMap.put(thisResourceId, ResourceStatus.IN_PROCESS);
-                      waitFor(promiseFor(activities.deleteResource(thisResourceId, stackId, accountId,
+                      waitFor(promiseFor(activities.rollbackCreateResource(thisResourceId, stackId, accountId,
                         effectiveUserId))) { String result->
                         JsonNode jsonNodeResult = JsonHelper.getJsonNodeFromString(result);
                         String returnResourceId = jsonNodeResult.get("resourceId").textValue();

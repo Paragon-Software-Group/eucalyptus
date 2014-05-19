@@ -68,7 +68,7 @@ import javax.persistence.PersistenceContext;
 import org.hibernate.annotations.Cache;
 import org.hibernate.annotations.CacheConcurrencyStrategy;
 import com.eucalyptus.auth.principal.UserFullName;
-import com.eucalyptus.cloud.ImageMetadata;
+import com.eucalyptus.compute.common.ImageMetadata;
 
 @Entity
 @PersistenceContext( name = "eucalyptus_cloud" )
@@ -95,4 +95,8 @@ public class KernelImageInfo extends PutGetImageInfo {
     return super.getManifestLocation( );
   }
   
+  @Override
+  public String getRunManifestLocation( ){
+    return this.getManifestLocation();
+  }
 }

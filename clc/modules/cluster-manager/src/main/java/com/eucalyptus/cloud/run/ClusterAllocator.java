@@ -1,5 +1,5 @@
 /*************************************************************************
- * Copyright 2009-2012 Eucalyptus Systems, Inc.
+ * Copyright 2009-2014 Eucalyptus Systems, Inc.
  *
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -64,6 +64,9 @@ package com.eucalyptus.cloud.run;
 
 import static com.eucalyptus.images.Images.findEbsRootOptionalSnapshot;
 
+import java.security.KeyPair;
+import java.security.MessageDigest;
+import java.security.cert.X509Certificate;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map.Entry;
@@ -72,15 +75,25 @@ import java.util.Set;
 import java.util.concurrent.Callable;
 import java.util.concurrent.ExecutionException;
 
+import javax.crypto.Cipher;
+import javax.crypto.SecretKey;
+import javax.crypto.spec.IvParameterSpec;
+import javax.crypto.spec.SecretKeySpec;
 import javax.persistence.EntityTransaction;
 
 import com.eucalyptus.cluster.callback.ResourceStateCallback;
-import com.eucalyptus.util.async.AsyncRequest;
 import com.google.common.collect.Sets;
 import edu.ucsb.eucalyptus.msgs.DescribeResourcesResponseType;
 import edu.ucsb.eucalyptus.msgs.DescribeResourcesType;
 import org.apache.log4j.Logger;
+import org.bouncycastle.util.Arrays;
+import org.bouncycastle.util.encoders.Base64;
 
+import com.eucalyptus.auth.Accounts;
+import com.eucalyptus.auth.AuthException;
+import com.eucalyptus.auth.euare.SignCertificateResponseType;
+import com.eucalyptus.auth.euare.SignCertificateType;
+import com.eucalyptus.auth.principal.User;
 import com.eucalyptus.blockstorage.Snapshot;
 import com.eucalyptus.blockstorage.Snapshots;
 import com.eucalyptus.blockstorage.Storage;
@@ -93,6 +106,7 @@ import com.eucalyptus.blockstorage.msgs.GetVolumeTokenType;
 import com.eucalyptus.blockstorage.msgs.StorageVolume;
 import com.eucalyptus.blockstorage.util.StorageProperties;
 import com.eucalyptus.cloud.ResourceToken;
+import com.eucalyptus.cloud.VmInstanceLifecycleHelpers;
 import com.eucalyptus.cloud.VmRunType;
 import com.eucalyptus.cloud.run.Allocations.Allocation;
 import com.eucalyptus.cloud.util.MetadataException;
@@ -100,18 +114,24 @@ import com.eucalyptus.cloud.util.NotEnoughResourcesException;
 import com.eucalyptus.cluster.Cluster;
 import com.eucalyptus.cluster.Clusters;
 import com.eucalyptus.cluster.ResourceState;
-import com.eucalyptus.cluster.callback.StartNetworkCallback;
 import com.eucalyptus.cluster.callback.VmRunCallback;
 import com.eucalyptus.component.Partitions;
 import com.eucalyptus.component.ServiceConfiguration;
 import com.eucalyptus.component.Topology;
+import com.eucalyptus.component.auth.SystemCredentials;
 import com.eucalyptus.component.id.ClusterController;
+import com.eucalyptus.component.id.Euare;
+import com.eucalyptus.compute.identifier.ResourceIdentifiers;
+import com.eucalyptus.crypto.Certs;
+import com.eucalyptus.crypto.Ciphers;
+import com.eucalyptus.crypto.Crypto;
+import com.eucalyptus.crypto.Digest;
+import com.eucalyptus.crypto.util.B64;
+import com.eucalyptus.crypto.util.PEMFiles;
 import com.eucalyptus.entities.Entities;
 import com.eucalyptus.images.BlockStorageImageInfo;
 import com.eucalyptus.images.Images;
 import com.eucalyptus.keys.SshKeyPair;
-import com.eucalyptus.network.NetworkGroup;
-import com.eucalyptus.network.NetworkGroups;
 import com.eucalyptus.records.EventRecord;
 import com.eucalyptus.records.EventType;
 import com.eucalyptus.records.Logs;
@@ -130,7 +150,9 @@ import com.eucalyptus.vm.VmVolumeAttachment;
 import com.google.common.base.Predicate;
 import com.google.common.collect.Iterables;
 import com.google.common.collect.Lists;
+
 import java.util.concurrent.TimeUnit;
+
 import edu.ucsb.eucalyptus.cloud.VirtualBootRecord;
 import edu.ucsb.eucalyptus.cloud.VmKeyInfo;
 import edu.ucsb.eucalyptus.cloud.VmRunResponseType;
@@ -142,7 +164,7 @@ public class ClusterAllocator implements Runnable {
   
   private static Logger     LOG          = Logger.getLogger( ClusterAllocator.class );
   
-  enum State {
+  public enum State {
     START,
     CREATE_VOLS,
     CREATE_IGROUPS,
@@ -161,6 +183,7 @@ public class ClusterAllocator implements Runnable {
   private final Allocation          allocInfo;
   private Cluster                   cluster;
   
+    
   enum SubmitAllocation implements Predicate<Allocation> {
     INSTANCE;
     
@@ -203,7 +226,8 @@ public class ClusterAllocator implements Runnable {
       this.cluster = Clusters.lookup( Topology.lookup( ClusterController.class, allocInfo.getPartition( ) ) );
       this.messages = new StatefulMessageSet<State>( this.cluster, State.values( ) );
       this.setupNetworkMessages( );
-      this.setupVolumeMessages();
+      this.setupVolumeMessages( );
+      this.setupCredentialMessages();
       this.updateResourceMessages( );
       db.commit( );
     } catch ( final Exception e ) {
@@ -262,6 +286,90 @@ public class ClusterAllocator implements Runnable {
       }
     }
   }
+  
+  private void setupCredentialMessages( ) {
+    try{
+      final User owner = Accounts.lookupUserById(this.allocInfo.getOwnerFullName().getUserId());
+      if(! owner.isSystemAdmin())
+        return;
+    }catch(final AuthException ex){
+      return;
+    }
+    // determine if credential setup is requested
+    if(allocInfo.getUserData()==null || 
+        allocInfo.getUserData().length< VmInstances.VmSpecialUserData.EUCAKEY_CRED_SETUP.toString().length())
+      return;
+    String userData = new String(allocInfo.getUserData(), 0, 
+        VmInstances.VmSpecialUserData.EUCAKEY_CRED_SETUP.toString().length());
+    if(!userData.startsWith(VmInstances.VmSpecialUserData.EUCAKEY_CRED_SETUP.toString()))
+      return;
+    userData = new String(allocInfo.getUserData());
+    String payload = null;
+    if(userData.length()> VmInstances.VmSpecialUserData.EUCAKEY_CRED_SETUP.toString().length()) {
+        payload=userData.substring(VmInstances.VmSpecialUserData.EUCAKEY_CRED_SETUP.toString().length()).trim();
+    } 
+    this.allocInfo.setUserDataAsString( payload );
+    // create rsa keypair
+    try{
+      final KeyPair kp = Certs.generateKeyPair();
+      final X509Certificate kpCert = Certs.generateCertificate(kp, 
+          String.format("Certificate-for-%s/%s", this.allocInfo.getOwnerFullName().getAccountName(),  
+              this.allocInfo.getOwnerFullName().getUserName()));
+      
+      // call iam:signCertificate with the pub key
+      final String b64PubKey = B64.standard.encString( PEMFiles.getBytes( kpCert ) );
+      final ServiceConfiguration euare = Topology.lookup(Euare.class);
+      final SignCertificateType req = new SignCertificateType();
+      req.setCertificate(b64PubKey);
+      
+      final SignCertificateResponseType resp= AsyncRequests.sendSync( euare, req );
+      final String token = resp.getSignCertificateResult().getSignature(); //in Base64
+      
+      // use NODECERT to encrypt the pk
+      // generate symmetric key
+      final MessageDigest digest = Digest.SHA256.get();
+      final byte[] salt = new byte[32];
+      Crypto.getSecureRandomSupplier().get().nextBytes(salt);
+      digest.update( salt );
+      final SecretKey symmKey = new SecretKeySpec( digest.digest(), "AES" );
+      
+      // encrypt the server pk
+      Cipher cipher = Ciphers.AES_GCM.get();
+      final byte[] iv = new byte[12];
+      Crypto.getSecureRandomSupplier().get().nextBytes(iv);
+      cipher.init( Cipher.ENCRYPT_MODE, symmKey, new IvParameterSpec( iv ) );
+      final byte[] cipherText = cipher.doFinal(Base64.encode(PEMFiles.getBytes(kp.getPrivate())));
+      final String encPrivKey = new String(Base64.encode(Arrays.concatenate(iv, cipherText)));
+      
+      // encrypt the token from EUARE
+      cipher = Ciphers.AES_GCM.get();
+      cipher.init( Cipher.ENCRYPT_MODE, symmKey, new IvParameterSpec( iv ) );
+      final byte[] byteToken = cipher.doFinal(token.getBytes());
+      final String encToken = new String(Base64.encode(Arrays.concatenate(iv, byteToken)));
+      
+      // encrypt the symmetric key
+      X509Certificate nodeCert = this.allocInfo.getPartition().getNodeCertificate();
+      cipher = Ciphers.RSA_PKCS1.get();
+      cipher.init(Cipher.ENCRYPT_MODE, nodeCert.getPublicKey());
+      byte[] symmkey = cipher.doFinal(symmKey.getEncoded());
+      final String encSymmKey = new String(Base64.encode(symmkey));
+      
+      X509Certificate euareCert = SystemCredentials.lookup(Euare.class).getCertificate();
+      final String b64EuarePubkey = B64.standard.encString( PEMFiles.getBytes( euareCert ) );
+    
+      // EUARE's pubkey, VM's pubkey, token from EUARE(ENCRYPTED), SYM_KEY(ENCRYPTED), VM_KEY(ENCRYPTED)
+      // each field all in B64
+      final String credential = String.format("%s\n%s\n%s\n%s\n%s",
+          b64EuarePubkey,
+          b64PubKey, 
+          encToken, // iam token
+          encSymmKey, 
+          encPrivKey);
+      this.allocInfo.setCredential(credential);
+    }catch(final Exception ex){
+      LOG.error("failed to setup instance credential", ex);
+    }
+  }
 
   // Modifying the logic to enable multiple block device mappings for boot from ebs. Fixes EUCA-3254 and implements EUCA-4786
   private void setupVolumeMessages( ) throws NoSuchElementException, MetadataException, ExecutionException {
@@ -295,15 +403,18 @@ public class ClusterAllocator implements Runnable {
               //spark - EUCA-7800: should explicitly set the volume size
               int volumeSize = mapping.getEbs().getVolumeSize()!=null? mapping.getEbs().getVolumeSize() : -1;
               if(volumeSize<=0){
-            	  if(mapping.getEbs().getSnapshotId() != null){
-            		  final Snapshot originalSnapshot = Snapshots.lookup(null, mapping.getEbs().getSnapshotId() );
-            		  volumeSize = originalSnapshot.getVolumeSize();
-            	  }else
-            		  volumeSize = rootVolSizeInGb;
+                if(mapping.getEbs().getSnapshotId() != null){
+                  final Snapshot originalSnapshot =
+                      Snapshots.lookup(null, ResourceIdentifiers.tryNormalize().apply( mapping.getEbs().getSnapshotId() ) );
+                  volumeSize = originalSnapshot.getVolumeSize();
+                }else
+                  volumeSize = rootVolSizeInGb;
               }
               
-              final Volume volume = Volumes.createStorageVolume( sc, this.allocInfo.getOwnerFullName( ), mapping.getEbs().getSnapshotId(), 
-            		  volumeSize, this.allocInfo.getRequest( ) );
+              final Volume volume = Volumes.createStorageVolume( sc,
+                  this.allocInfo.getOwnerFullName( ),
+                  ResourceIdentifiers.tryNormalize().apply( mapping.getEbs().getSnapshotId() ),
+                  volumeSize, this.allocInfo.getRequest( ) );
               Boolean isRootDevice = mapping.getDeviceName().equals(rootDevName);
               if ( mapping.getEbs().getDeleteOnTermination() ) {
                 vm.addPersistentVolume( mapping.getDeviceName(), volume, isRootDevice );
@@ -343,7 +454,7 @@ public class ClusterAllocator implements Runnable {
           }
           
           // Go through all ephemeral attachment records and populate them into resource token so they can used for vbr construction
-          for (VmEphemeralAttachment attachment : vm.getBootRecord( ).getEphmeralStorage()) {
+          for (VmEphemeralAttachment attachment : vm.getBootRecord( ).getEphemeralStorage()) {
         	token.getEphemeralDisks().put(attachment.getDevice(), attachment.getEphemeralId());
           }
         }
@@ -353,27 +464,14 @@ public class ClusterAllocator implements Runnable {
   
   @SuppressWarnings( "unchecked" )
   private void setupNetworkMessages( ) throws NotEnoughResourcesException {
-    final NetworkGroup net = this.allocInfo.getPrimaryNetwork( );
-    if ( net != null ) {
-      final Request callback = AsyncRequests.newRequest( new StartNetworkCallback( this.allocInfo.getExtantNetwork( ) ) );
-      this.messages.addRequest( State.CREATE_NETWORK, callback );
-      LOG.debug( "Queued StartNetwork: " + callback );
-      EventRecord.here( ClusterAllocator.class, EventType.VM_PREPARE, callback.getClass( ).getSimpleName( ), net.toString( ) ).debug( );
-    }
+    VmInstanceLifecycleHelpers.get( ).prepareNetworkMessages( this.allocInfo, this.messages );
   }
   
   private void setupVmMessages( final ResourceToken token ) throws Exception {
-    final String networkName = NetworkGroups.networkingConfiguration( ).hasNetworking( )
-                                                                                        ? this.allocInfo.getPrimaryNetwork( ).getNaturalId( )
-                                                                                        : NetworkGroups.lookup(
-                                                                                          this.allocInfo.getOwnerFullName( ).asAccountFullName( ),
-                                                                                          NetworkGroups.defaultNetworkName( ) ).getNaturalId( );
-
-    final SshKeyPair keyInfo = this.allocInfo.getSshKeyPair( );
-    final VmTypeInfo vmInfo = this.allocInfo.getVmTypeInfo( );
+    final VmTypeInfo vmInfo = this.allocInfo.getVmTypeInfo( this.allocInfo.getPartition( ), token.getAllocationInfo().getReservationId() );
     try {
       final VmTypeInfo childVmInfo = this.makeVmTypeInfo( vmInfo, token );
-      final VmRunCallback callback = this.makeRunCallback( token, childVmInfo, networkName );
+      final VmRunCallback callback = this.makeRunCallback( token, childVmInfo );
       final Request<VmRunType, VmRunResponseType> req = AsyncRequests.newRequest( callback );
       this.messages.addRequest( State.CREATE_VMS, req );
       this.messages.addCleanup( new Runnable( ) {
@@ -531,7 +629,7 @@ public class ClusterAllocator implements Runnable {
     throw new EucalyptusCloudException( "volume " + vol.getDisplayName( ) + " was not created in time" );
   }
   
-  private VmRunCallback makeRunCallback( final ResourceToken childToken, final VmTypeInfo vmInfo, final String networkName ) {
+  private VmRunCallback makeRunCallback( final ResourceToken childToken, final VmTypeInfo vmInfo ) {
     final SshKeyPair keyPair = this.allocInfo.getSshKeyPair( );
     final VmKeyInfo vmKeyInfo = new VmKeyInfo( keyPair.getName( ), keyPair.getPublicKey( ), keyPair.getFingerPrint( ) );
     final String platform = this.allocInfo.getBootSet( ).getMachine( ).getPlatform( ).name( ) != null
@@ -539,17 +637,18 @@ public class ClusterAllocator implements Runnable {
                                                                                                      : "linux"; // ASAP:FIXME:GRZE
     
 //TODO:GRZE:FINISH THIS.    Date date = Contexts.lookup( ).getContracts( ).get( Contract.Type.EXPIRATION ); 
-    final VmRunType run = VmRunType.builder()
-                                   .instanceId( childToken.getInstanceId() )
-                                   .naturalId( childToken.getInstanceUuid() )
+    final VmRunType.Builder builder = VmRunType.builder( );
+    VmInstanceLifecycleHelpers.get( ).prepareVmRunType( childToken, builder );
+    final VmRunType run = builder
+                                   .instanceId( childToken.getInstanceId( ) )
+                                   .naturalId( childToken.getInstanceUuid( ) )
                                    .keyInfo( vmKeyInfo )
-                                   .launchIndex( childToken.getLaunchIndex() )
-                                   .networkIndex( childToken.getNetworkIndex().getIndex() )
-                                   .networkNames( this.allocInfo.getNetworkGroups() )
+                                   .launchIndex( childToken.getLaunchIndex( ) )
+                                   .networkNames( this.allocInfo.getNetworkGroups( ) )
                                    .platform( platform )
-                                   .reservationId( childToken.getAllocationInfo().getReservationId() )
-                                   .userData( this.allocInfo.getRequest().getUserData() )
-                                   .vlan( childToken.getExtantNetwork( ) != null ? childToken.getExtantNetwork().getTag( ) : new Integer(-1) )
+                                   .reservationId( childToken.getAllocationInfo( ).getReservationId( ) )
+                                   .userData( this.allocInfo.getRequest( ).getUserData( ) )
+                                   .credential( this.allocInfo.getCredential( ) )
                                    .vmTypeInfo( vmInfo )
                                    .owner( this.allocInfo.getOwnerFullName( ) )
                                    .create( );

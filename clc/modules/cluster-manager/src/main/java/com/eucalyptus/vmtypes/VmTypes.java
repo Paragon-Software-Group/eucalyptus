@@ -1,5 +1,5 @@
 /*************************************************************************
- * Copyright 2009-2012 Eucalyptus Systems, Inc.
+ * Copyright 2009-2013 Eucalyptus Systems, Inc.
  *
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -62,21 +62,22 @@
 
 package com.eucalyptus.vmtypes;
 
-import java.util.Comparator;
 import java.util.NavigableSet;
 import java.util.NoSuchElementException;
 import java.util.Set;
-import java.util.SortedSet;
 import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.ConcurrentNavigableMap;
 import java.util.concurrent.ConcurrentSkipListMap;
 import java.util.concurrent.atomic.AtomicMarkableReference;
+
+import javax.annotation.Nonnull;
 import javax.annotation.Nullable;
-import javax.persistence.EntityTransaction;
+
 import org.apache.log4j.Logger;
-import com.eucalyptus.cloud.CloudMetadata.VmTypeMetadata;
-import com.eucalyptus.cloud.ImageMetadata;
-import com.eucalyptus.cloud.ImageMetadata.StaticDiskImage;
+
+import com.eucalyptus.compute.common.CloudMetadata.VmTypeMetadata;
+import com.eucalyptus.compute.common.ImageMetadata;
+import com.eucalyptus.compute.common.ImageMetadata.StaticDiskImage;
 import com.eucalyptus.cloud.util.InvalidMetadataException;
 import com.eucalyptus.cloud.util.MetadataException;
 import com.eucalyptus.cloud.util.NoSuchMetadataException;
@@ -85,23 +86,23 @@ import com.eucalyptus.cluster.Clusters;
 import com.eucalyptus.component.ServiceConfiguration;
 import com.eucalyptus.component.Topology;
 import com.eucalyptus.component.id.ClusterController;
+import com.eucalyptus.compute.common.backend.VmTypeDetails;
 import com.eucalyptus.configurable.ConfigurableClass;
 import com.eucalyptus.configurable.ConfigurableField;
 import com.eucalyptus.entities.Entities;
 import com.eucalyptus.images.BlockStorageImageInfo;
 import com.eucalyptus.images.BootableImageInfo;
-import com.eucalyptus.records.Logs;
+import com.eucalyptus.images.MachineImageInfo;
 import com.eucalyptus.util.Classes;
 import com.eucalyptus.util.RestrictedTypes.Resolver;
+import com.eucalyptus.util.TypeMapper;
 import com.google.common.base.Function;
-import com.google.common.base.Joiner;
 import com.google.common.base.Predicate;
-import com.google.common.base.Supplier;
-import com.google.common.base.Suppliers;
 import com.google.common.collect.ForwardingConcurrentMap;
 import com.google.common.collect.Iterables;
 import com.google.common.collect.Iterators;
 import com.google.common.collect.Sets;
+
 import edu.ucsb.eucalyptus.msgs.VmTypeInfo;
 
 @ConfigurableClass( root = "cloud.vmtypes",
@@ -551,8 +552,8 @@ public class VmTypes {
         vmTypeInfo = VmTypes.InstanceStoreWindowsVmTypeInfoMapper.INSTANCE.apply( vmType );
         vmTypeInfo.setEphemeral( 0, "sdb", diskSize - imgSize, "none" );
       } else if(ImageMetadata.VirtualizationType.hvm.equals(img.getVirtualizationType())){
-    	vmTypeInfo = VmTypes.InstanceStoreLinuxHvmVmTypeInfoMapper.INSTANCE.apply(vmType);
-        vmTypeInfo.setEphemeral( 0, "sdb", diskSize - imgSize, "none" );
+        vmTypeInfo = VmTypes.InstanceStoreLinuxHvmVmTypeInfoMapper.INSTANCE.apply(vmType);
+        vmTypeInfo.setEphemeral( 0, "sdb", diskSize - imgSize, "ext3" );
       } else
       {
         vmTypeInfo = VmTypes.InstanceStoreVmTypeInfoMapper.INSTANCE.apply( vmType );
@@ -570,7 +571,6 @@ public class VmTypes {
         }
         vmTypeInfo.setEphemeral( 0, "sda2", ephemeralSize, "ext3" );
       }
-      vmTypeInfo.setRoot( img.getDisplayName( ), ( ( StaticDiskImage ) img ).getManifestLocation( ), imgSize );
     } else if ( img instanceof BlockStorageImageInfo ) {
       vmTypeInfo = VmTypes.BlockStorageVmTypeInfoMapper.INSTANCE.apply( vmType );
       vmTypeInfo.setRootDeviceName(img.getRootDeviceName());
@@ -588,7 +588,7 @@ public class VmTypes {
     
     @Override
     public VmTypeInfo apply( VmType arg0 ) {
-      return new VmTypeInfo( arg0.getName( ), arg0.getMemory( ), arg0.getDisk( ), arg0.getCpu( ), "sda1" ) {
+      return new VmTypeInfo( arg0.getName( ), arg0.getMemory( ), arg0.getDisk( ), arg0.getCpu( ), "sda" ) {
         {
           this.setSwap( "sda3", VmTypes.SWAP_SIZE_BYTES );
         }
@@ -622,5 +622,21 @@ public class VmTypes {
       return new VmTypeInfo( arg0.getName( ), arg0.getMemory( ), arg0.getDisk( ), arg0.getCpu( ), "sda" );
     }
   };
-  
+
+  @TypeMapper
+  public enum VmTypeToVmTypeDetails implements Function<VmType, VmTypeDetails> {
+    INSTANCE;
+
+    @Override
+    @Nonnull
+    public VmTypeDetails apply( final VmType vmType ) {
+      final VmTypeDetails vmTypeDetails = new VmTypeDetails();
+      vmTypeDetails.setName( vmType.getName( ) );
+      vmTypeDetails.setCpu( vmType.getCpu( ) );
+      vmTypeDetails.setDisk( vmType.getDisk( ) );
+      vmTypeDetails.setMemory( vmType.getMemory( ) );
+      return vmTypeDetails;
+    }
+  }
+
 }

@@ -1,5 +1,5 @@
 /*******************************************************************************
- *Copyright (c) 2009  Eucalyptus Systems, Inc.
+ *Copyright (c) 2009-2014  Eucalyptus Systems, Inc.
  * 
  *  This program is free software: you can redistribute it and/or modify
  *  it under the terms of the GNU General Public License as published by
@@ -98,11 +98,12 @@ import com.eucalyptus.component.ServiceConfigurations;
 import com.eucalyptus.component.id.ClusterController;
 import com.eucalyptus.configurable.ConfigurableClass;
 import com.eucalyptus.configurable.ConfigurableProperty;
+import com.eucalyptus.configurable.ConfigurablePropertyException;
 import com.eucalyptus.configurable.PropertyDirectory;
 import com.eucalyptus.crypto.Ciphers;
 import com.eucalyptus.entities.Entities;
 import com.eucalyptus.entities.EntityWrapper;
-import com.eucalyptus.objectstorage.util.WalrusProperties;
+import com.eucalyptus.objectstorage.util.ObjectStorageProperties;
 import com.eucalyptus.storage.common.CheckerTask;
 import com.eucalyptus.system.BaseDirectory;
 import com.eucalyptus.util.EucalyptusCloudException;
@@ -232,7 +233,6 @@ public class DASManager implements LogicalStorageManager {
 		return SystemUtil.run(new String[]{EUCA_ROOT_WRAPPER, "dd", "if=" + oldLvName, "of=" + newLvName, "bs=" + StorageProperties.blockSize});
 	}
 
-
 	protected String createFile(String fileName, long size) throws EucalyptusCloudException {
 		if(!DirectStorageInfo.getStorageInfo().getZeroFillVolumes())
 			return SystemUtil.run(new String[]{EUCA_ROOT_WRAPPER, "dd", "if=/dev/zero", "of=" + fileName, "count=1", "bs=" + StorageProperties.blockSize, "seek=" + (size -1)});
@@ -246,7 +246,7 @@ public class DASManager implements LogicalStorageManager {
 	}
 
 	public String createAbsoluteEmptyFile(String fileName, long size) throws EucalyptusCloudException {
-		size = size / WalrusProperties.M;
+		size = size / ObjectStorageProperties.M;
 		return createFile(fileName, size);
 	}
 
@@ -674,7 +674,7 @@ public class DASManager implements LogicalStorageManager {
 				volumeManager = new VolumeEntityWrapperManager();
 				volumeManager.add(snapshotInfo);
 				returnValues.add(snapRawFileName);
-				returnValues.add(String.valueOf(size * WalrusProperties.G));
+				returnValues.add(String.valueOf(size * ObjectStorageProperties.G));
 				// } catch(EucalyptusCloudException ex) {
 			} catch(Exception ex) {
 				if(volumeManager != null)
@@ -1009,7 +1009,7 @@ public class DASManager implements LogicalStorageManager {
 				ConfigurableProperty entry = PropertyDirectory.getPropertyEntry(prop.getQualifiedName());
 				//type parser will correctly covert the value
 				entry.setValue(prop.getValue());
-			} catch (IllegalAccessException e) {
+			} catch (IllegalAccessException | ConfigurablePropertyException e) {
 				LOG.error(e, e);
 			}
 		}

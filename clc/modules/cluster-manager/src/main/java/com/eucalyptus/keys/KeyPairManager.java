@@ -1,5 +1,5 @@
 /*************************************************************************
- * Copyright 2009-2012 Eucalyptus Systems, Inc.
+ * Copyright 2009-2014 Eucalyptus Systems, Inc.
  *
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -71,16 +71,19 @@ import java.security.KeyFactory;
 import java.security.PrivateKey;
 import java.security.interfaces.RSAPublicKey;
 import java.security.spec.X509EncodedKeySpec;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.NoSuchElementException;
 import javax.persistence.PersistenceException;
 
 import com.eucalyptus.cloud.util.DuplicateMetadataException;
 import com.eucalyptus.util.Exceptions;
+import com.google.common.collect.ImmutableList;
 import org.apache.log4j.Logger;
 import org.bouncycastle.openssl.PEMWriter;
 import org.bouncycastle.util.encoders.DecoderException;
 import com.eucalyptus.auth.AuthException;
-import com.eucalyptus.cloud.CloudMetadatas;
+import com.eucalyptus.compute.common.CloudMetadatas;
 import com.eucalyptus.compute.ClientComputeException;
 import com.eucalyptus.context.Context;
 import com.eucalyptus.context.Contexts;
@@ -117,15 +120,26 @@ public class KeyPairManager {
     final DescribeKeyPairsResponseType reply = request.getReply( );
     final Context ctx = Contexts.lookup( );
     final boolean showAll = request.getKeySet( ).remove( "verbose" );
-    final OwnerFullName ownerFullName = ctx.hasAdministrativePrivileges( ) &&  showAll  ? null : Contexts.lookup( ).getUserFullName( ).asAccountFullName( );
+    final OwnerFullName ownerFullName = ctx.isAdministrator( ) &&  showAll  ? null : Contexts.lookup( ).getUserFullName( ).asAccountFullName( );
     final Filter filter = Filters.generate( request.getFilterSet(), SshKeyPair.class );
     final Predicate<? super SshKeyPair> requestedAndAccessible = CloudMetadatas.filteringFor( SshKeyPair.class )
         .byId( request.getKeySet( ) )
         .byPredicate( filter.asPredicate() )
         .byPrivileges()
         .buildPredicate();
+    final List<String> foundKeyNameList = new ArrayList<String>( );
     for ( final SshKeyPair kp : KeyPairs.list( ownerFullName, requestedAndAccessible, filter.asCriterion(), filter.getAliases() ) ) {
       reply.getKeySet( ).add( new DescribeKeyPairsResponseItemType( kp.getDisplayName( ), kp.getFingerPrint( ) ) );
+      foundKeyNameList.add( kp.getDisplayName( ) );
+    }
+
+    if ( !request.getKeySet( ).isEmpty( ) && request.getKeySet( ).size( ) != reply.getKeySet( ).size( ) ) {
+      List<String> reverseRequestedKeySet = ImmutableList.copyOf( request.getKeySet( ) ).reverse( );
+      for ( String requestedKey : reverseRequestedKeySet ) {
+        if ( !foundKeyNameList.contains( requestedKey ) ) {
+          throw new ClientComputeException( "InvalidKeyPair.NotFound", "The key pair '" + requestedKey + "' does not exist" );
+        }
+      }
     }
     return reply;
   }
@@ -223,11 +237,11 @@ public class KeyPairManager {
         RestrictedTypes.allocateUnitlessResource( allocator );
       } catch (GeneralSecurityException e) {
         LOG.warn("Error importing SSH public key", e);
-        throw new EucalyptusCloudException("Key import error.");
+        throw new ClientComputeException( "InvalidKey.Format", "Invalid or unsupported key format" );
       }
     }
     if ( duplicate ) {
-      throw new EucalyptusCloudException("Duplicate key '"+request.getKeyName()+"'");
+      throw new ClientComputeException( "InvalidKeyPair.Duplicate", "The keypair '"+request.getKeyName()+"' already exists." );
     }
     return reply;
   }
