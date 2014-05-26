@@ -70,7 +70,8 @@
 	</target>
 	<target name="build-module">
 		<mkdir dir="build"/>
-		<native-make dir="src/main/native" target="all" />
+		<!-- Ignore build due to dependencies -->
+		<!--native-make dir="src/main/native" target="all" /-->
 	</target>
 	<target name="clean-module">
 		<native-make dir="src/main/native" target="clean" />

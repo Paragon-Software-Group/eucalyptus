@@ -60,7 +60,7 @@
 #   IDENTIFIED, OR WITHDRAWAL OF THE CODE CAPABILITY TO THE EXTENT
 #   NEEDED TO COMPLY WITH ANY SUCH LICENSES OR RIGHTS.
 
-include ../Makedefs
+#include ../Makedefs
 
 theme_dir	= ${TOP}/clc/modules/www/src/main/java/com/eucalyptus/webui/public/themes
 web_prop_dir	= ${TOP}/clc/modules/www/conf
