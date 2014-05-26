@@ -138,7 +138,7 @@ public class NioHttpDecoder extends ReplayingDecoder<NioHttpDecoder.State> {
 
   public NioHttpDecoder( ) {
     this( StackConfiguration.HTTP_MAX_INITIAL_LINE_BYTES, StackConfiguration.HTTP_MAX_HEADER_BYTES,
-      256*1024*1024  #StackConfiguration.HTTP_MAX_CHUNK_BYTES <--- this property is reset somehow. dunno why and how
+      256*1024*1024  //StackConfiguration.HTTP_MAX_CHUNK_BYTES <--- this property is reset somehow. dunno why and how
       );
   }
 
