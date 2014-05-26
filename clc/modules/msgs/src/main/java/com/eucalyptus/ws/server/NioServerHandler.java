@@ -132,6 +132,8 @@ public class NioServerHandler extends SimpleChannelUpstreamHandler {//TODO:GRZE:
       ctx.sendUpstream( e );
     } catch ( Exception ex ) {
       LOG.error( ex , ex );
+      ex.printStackTrace();
+      ex.printStackTrace(LOG);
       Logs.extreme( ).error( ex, ex );
       stat.call( );
       this.sendError( ctx, HttpResponseStatus.NOT_FOUND, ex );

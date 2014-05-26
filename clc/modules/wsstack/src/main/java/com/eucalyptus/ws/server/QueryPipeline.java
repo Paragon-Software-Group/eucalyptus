@@ -90,6 +90,8 @@ public abstract class QueryPipeline extends FilteredPipeline {
         buffer.resetReaderIndex( );
         for ( String p : query.split( "&" ) ) {
           String[] splitParam = p.split( "=" );
+          if (splitParam.length < 2)
+	continue;
           String lhs = splitParam[0];
           String rhs = splitParam.length == 2 ? splitParam[1] : null;
           try {
