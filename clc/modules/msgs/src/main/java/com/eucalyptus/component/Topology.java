@@ -1151,12 +1151,12 @@ public class Topology {
         return endResult;
       } catch ( final Exception ex ) {
         if ( Exceptions.isCausedBy( ex, ExistingTransitionException.class ) ) {
-          LOG.error( this.toString( input, initialState, nextState, ex ) );
+          LOG.debug( this.toString( input, initialState, nextState, ex ) );
           enabledEndState = true;
           throw Exceptions.toUndeclared( ex );
         } else {
           Exceptions.maybeInterrupted( ex );
-          LOG.error( this.toString( input, initialState, nextState, ex ) );
+          LOG.debug( this.toString( input, initialState, nextState, ex ) );
           Logs.extreme( ).error( ex, Throwables.getRootCause( ex ) );
           Logs.extreme( ).error( ex, ex );
           throw Exceptions.toUndeclared( ex );

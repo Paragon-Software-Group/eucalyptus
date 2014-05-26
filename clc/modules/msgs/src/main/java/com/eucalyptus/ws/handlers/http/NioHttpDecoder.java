@@ -138,8 +138,7 @@ public class NioHttpDecoder extends ReplayingDecoder<NioHttpDecoder.State> {
 
   public NioHttpDecoder( ) {
     this( StackConfiguration.HTTP_MAX_INITIAL_LINE_BYTES, StackConfiguration.HTTP_MAX_HEADER_BYTES,
-      //StackConfiguration.HTTP_MAX_CHUNK_BYTES
-      1024*1024*256 // hardcode the large buffer
+      StackConfiguration.HTTP_MAX_CHUNK_BYTES
       );
   }
 
