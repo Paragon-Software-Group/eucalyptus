@@ -51,6 +51,8 @@ git clone https://github.com/eucalyptus/eucalyptus-rpmspec.git
 
 cd clc
 
+export JAVA_HOME=/usr/lib/jvm/java-1.7.0
+
 export ANT=/usr/bin/ant
 
 make 
@@ -61,6 +63,12 @@ make
 
 service eucalyptus-cloud stop
 
-cp ~/eucalyptus/clc/target/* /usr/share/eucalyptus
+cp ~/eucalyptus/clc/eucalyptus-msgs-3.4.2.jar /usr/share/eucalyptus/
+
+cp ~/eucalyptus/clc/target/eucalyptus-ws-3.4.2.jar /usr/share/eucalyptus/
+
+cp ~/eucalyptus/clc/target/eucalyptus-object-storage-common-3.4.2.jar /usr/share/eucalyptus/
+
+cp ~/eucalyptus/clc/target/eucalyptus-object-storage-3.4.2.jar /usr/share/eucalyptus
 
 service eucalyptus-cloud start
