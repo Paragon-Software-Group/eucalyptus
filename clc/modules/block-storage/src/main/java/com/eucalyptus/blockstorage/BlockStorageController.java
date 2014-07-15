@@ -74,19 +74,16 @@ import java.util.List;
 import java.util.Map;
 import java.util.NoSuchElementException;
 import java.util.Random;
-import java.util.Set;
 import java.util.UUID;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 import javax.persistence.EntityTransaction;
 
 import org.apache.log4j.Logger;
 import org.apache.tools.ant.util.DateUtils;
 import org.hibernate.Criteria;
-import org.hibernate.criterion.Projections;
 import org.hibernate.criterion.Restrictions;
 
-import com.eucalyptus.blockstorage.Storage;
-import com.eucalyptus.blockstorage.Volume;
 import com.eucalyptus.blockstorage.entities.SnapshotInfo;
 import com.eucalyptus.blockstorage.entities.StorageInfo;
 import com.eucalyptus.blockstorage.entities.VolumeExportRecord;
@@ -170,7 +167,19 @@ public class BlockStorageController {
 	static VolumeService volumeService;
 	static SnapshotService snapshotService;
 	static StorageCheckerService checkerService;
-	
+
+    //Introduced for testing EUCA-9297 fix: allows artificial capacity changes of backend
+    static boolean setUseTestingDelegateManager(boolean enableDelegate) {
+        if(enableDelegate && !(blockManager instanceof StorageManagerTestingProxy)) {
+            LOG.info("Switching to use delegating storage manager for testing");
+            blockManager = new StorageManagerTestingProxy(blockManager);
+        } else if(!enableDelegate && (blockManager instanceof StorageManagerTestingProxy)) {
+            LOG.info("Switching to NOT use delegating storage manager anymore");
+            blockManager = ((StorageManagerTestingProxy)blockManager).getDelegateStorageManager();
+        }
+        return enableDelegate;
+    }
+
 	//TODO: zhill, this can be added later for snapshot abort capabilities
 	//static ConcurrentHashMap<String,HttpTransfer> httpTransferMap; //To keep track of current transfers to support aborting
 
@@ -182,7 +191,8 @@ public class BlockStorageController {
 		StorageProperties.updateStorageHost();
 
 		try {
-			blockManager = StorageManagers.getInstance();
+            blockManager = StorageManagers.getInstance();
+
 			if(blockManager != null) {
 				blockManager.initialize();
 			}
@@ -600,8 +610,9 @@ public class BlockStorageController {
 			db.commit();
 		} catch(NoSuchElementException e) {
 			// Set the response element to false if the volume entity does not exist in the SC database
+			// if record is not found, delete is idempotent
 			LOG.error("Unable to find volume in SC database: " + volumeId);
-			throw new EucalyptusCloudException("Volume record not found",e);
+			reply.set_return(Boolean.FALSE); 
 		} catch(EucalyptusCloudException e) {
 			LOG.error("Error marking volume " + volumeId + " for deletion: " + e.getMessage());
 			throw e;
@@ -1125,15 +1136,18 @@ public class BlockStorageController {
 			}
 		}
 
+
 		ArrayList<StorageVolume> volumes = reply.getVolumeSet();
 		for(VolumeInfo volumeInfo: volumeInfos) {
 			volumes.add(convertVolumeInfo(volumeInfo));
-			if(volumeInfo.getStatus().equals(StorageProperties.Status.failed.toString())) {
+            if(volumeInfo.getStatus().equals(StorageProperties.Status.failed.toString()) &&
+                    (System.currentTimeMillis() - volumeInfo.getLastUpdateTimestamp().getTime() > StorageProperties.FAILED_STATE_CLEANUP_THRESHOLD_MS)) {
 				LOG.warn( "Failed volume, cleaning it: " + volumeInfo.getVolumeId() );
 				checker.cleanFailedVolume(volumeInfo.getVolumeId());
-			} 
+			}
 		}
-		db.commit();
+
+        db.commit();
 		return reply;
 	}
 
@@ -1684,7 +1698,7 @@ public class BlockStorageController {
 						}
 
 						// Create the volume from the snapshot, this can happen in parallel.
-						size = blockManager.createVolume(volumeId, snapshotId, size);
+                        size = blockManager.createVolume(volumeId, snapshotId, size);
 					} else {
 						// Snapshot does exist on this SC. Repeated logic, fix it!
 						SnapshotInfo foundSnapshotInfo = foundSnapshotInfos.get(0);
@@ -1840,6 +1854,7 @@ public class BlockStorageController {
 	}
 
 	public static class VolumeDeleterTask extends CheckerTask {
+		private final AtomicBoolean running = new AtomicBoolean( false );
 
 		public VolumeDeleterTask() {
 			this.name = "VolumeDeleter";
@@ -1847,61 +1862,67 @@ public class BlockStorageController {
 
 		@Override
 		public void run() {
-			EntityWrapper<VolumeInfo> db = StorageProperties.getEntityWrapper();
-			try {
-				VolumeInfo searchVolume = new VolumeInfo();
-				searchVolume.setStatus(StorageProperties.Status.deleting.toString());
-				List<VolumeInfo> volumes = db.query(searchVolume);
-				db.commit();
-				for (VolumeInfo vol : volumes) {
-					//Do separate transaction for each volume so we don't
-					// keep the transaction open for a long time					
-					db = StorageProperties.getEntityWrapper();
-					try {
-						vol = db.getUnique(vol);
-						final String volumeId = vol.getVolumeId();
-						LOG.info("Volume: " + volumeId + " marked for deletion. Checking export status");
-						if(Iterables.any(vol.getAttachmentTokens(), new Predicate<VolumeToken>() {					
-							@Override
-							public boolean apply(VolumeToken token) {
-								//Return true if attachment is valid or export exists.
+			if ( running.compareAndSet( false, true ) ) try {
+				EntityWrapper<VolumeInfo> db = StorageProperties.getEntityWrapper();
+				try {
+					VolumeInfo searchVolume = new VolumeInfo();
+					searchVolume.setStatus(StorageProperties.Status.deleting.toString());
+					List<VolumeInfo> volumes = db.query(searchVolume);
+					db.commit();
+					for (VolumeInfo vol : volumes) {
+						//Do separate transaction for each volume so we don't
+						// keep the transaction open for a long time
+						db = StorageProperties.getEntityWrapper();
+						try {
+							vol = db.getUnique(vol);
+							final String volumeId = vol.getVolumeId();
+							LOG.info("Volume: " + volumeId + " marked for deletion. Checking export status");
+							if(Iterables.any(vol.getAttachmentTokens(), new Predicate<VolumeToken>() {
+								@Override
+								public boolean apply(VolumeToken token) {
+									//Return true if attachment is valid or export exists.
+									try {
+										return token.hasActiveExports();
+									} catch(EucalyptusCloudException e) {
+										LOG.warn("Failure checking for active exports for volume " + volumeId);
+										return false;
+									}
+								}
+							})) {
+								//Exports exists... try un exporting the volume before deleting.
+								LOG.info("Volume: " + volumeId + " found to be exported. Detaching volume from all hosts");
 								try {
-									return token.hasActiveExports();
-								} catch(EucalyptusCloudException e) {
-									LOG.warn("Failure checking for active exports for volume " + volumeId);
-									return false;
+									Entities.asTransaction(VolumeInfo.class, invalidateAndDetachAll()).apply(volumeId);
+								} catch(Exception e) {
+									LOG.error("Failed to fully detach volume " + volumeId, e);
 								}
 							}
-						})) {
-							//Exports exists... try un exporting the volume before deleting.
-							LOG.info("Volume: " + volumeId + " found to be exported. Detaching volume from all hosts");
-							try {			
-								Entities.asTransaction(VolumeInfo.class, invalidateAndDetachAll()).apply(volumeId);
-							} catch(Exception e) {
-								LOG.error("Failed to fully detach volume " + volumeId, e);
+
+							LOG.info("Volume: " + volumeId + " was marked for deletion. Cleaning up...");
+							try {
+								blockManager.deleteVolume(volumeId);
+							} catch (EucalyptusCloudException e) {
+								LOG.error(e, e);
+								continue;
 							}
+							vol.setStatus(StorageProperties.Status.deleted.toString());
+							EucaSemaphoreDirectory.removeSemaphore(volumeId);
+							db.commit();
+						} catch(Exception e) {
+							LOG.error("Error deleting volume " + vol.getVolumeId() + ": " + e.getMessage());
+							LOG.debug("Exception during deleting volume " + vol.getVolumeId() + ".", e);
+						} finally {
+							db.rollback();
 						}
-						
-						LOG.info("Volume: " + volumeId + " was marked for deletion. Cleaning up...");
-						try {
-							blockManager.deleteVolume(volumeId);
-						} catch (EucalyptusCloudException e) {
-							LOG.error(e, e);
-							continue;
-						}
-						vol.setStatus(StorageProperties.Status.deleted.toString());
-						EucaSemaphoreDirectory.removeSemaphore(volumeId);
-						db.commit();
-					} catch(Exception e) {
-						LOG.error("Error deleting volume " + vol.getVolumeId() + ": " + e.getMessage());
-						LOG.debug("Exception during deleting volume " + vol.getVolumeId() + ".", e);
-					} finally {
-						db.rollback();
 					}
+				} catch(Exception e) {
+					LOG.error("Failed during delete task.",e);
 				}
-			} catch(Exception e) {
-				LOG.error("Failed during delete task.",e);				
-			} 
+			} finally {
+				running.set( false );
+			} else {
+				LOG.warn( "Skipping task (busy)" );
+			}
 		}
 	}
 	

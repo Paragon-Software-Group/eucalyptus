@@ -1286,6 +1286,8 @@ public class WalrusImageManager {
 											throw new NoSuchEntityException(objectKey);
 										}
 										db2.commit();
+									} catch (Exception e) {
+										logWithContext("Failed to commit ImageCacheInfo UseCount, record may already be updated or removed: " + e.getMessage(), Level.DEBUG, correlationId, accountNumber);
 									} finally {
 										db2.rollback();
 									}
@@ -1328,6 +1330,13 @@ public class WalrusImageManager {
 				logWithContext("GetDecryptedImage failed for image: " + bucketName + "/" + objectKey + ". No such bucket found.", null, correlationId, accountNumber);
 				throw new NoSuchBucketException(bucketName);
 			}
+		} catch (WalrusException e) {
+			throw e;
+		} catch(Exception e) {
+				throw new WalrusException("InternalError", "Internal error getting image: " + e.getMessage(),
+					"decryptedImage",
+					bucketName + "/" + objectKey,
+					HttpResponseStatus.INTERNAL_SERVER_ERROR);
 		} finally {
 			db.rollback();
 		}
