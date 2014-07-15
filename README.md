@@ -63,12 +63,12 @@ make
 
 service eucalyptus-cloud stop
 
-cp ~/eucalyptus/clc/eucalyptus-msgs-3.4.2.jar /usr/share/eucalyptus/
+cp ~/eucalyptus/clc/eucalyptus-msgs-3.4.3.jar /usr/share/eucalyptus/
 
-cp ~/eucalyptus/clc/target/eucalyptus-ws-3.4.2.jar /usr/share/eucalyptus/
+cp ~/eucalyptus/clc/target/eucalyptus-ws-3.4.3.jar /usr/share/eucalyptus/
 
-cp ~/eucalyptus/clc/target/eucalyptus-object-storage-common-3.4.2.jar /usr/share/eucalyptus/
+cp ~/eucalyptus/clc/target/eucalyptus-object-storage-common-3.4.3.jar /usr/share/eucalyptus/
 
-cp ~/eucalyptus/clc/target/eucalyptus-object-storage-3.4.2.jar /usr/share/eucalyptus
+cp ~/eucalyptus/clc/target/eucalyptus-object-storage-3.4.3.jar /usr/share/eucalyptus
 
 service eucalyptus-cloud start
