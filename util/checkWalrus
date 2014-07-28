@@ -1,0 +1,27 @@
+#!/bin/sh
+configFolder=~/configs
+configName=$configFolder/walrusCfg
+RED='\033[0;31m'         #  ${RED}
+GREEN='\033[0;32m'      #  ${GREEN}
+NORMAL='\033[0m'
+echo -n "Checking walrus status: "
+s3cmd -c $configName ls >>/dev/null&
+s3cmdpid=`ps ax|grep s3cmd|grep -v grep|sed "s/ .*//"`
+sleep 2
+if(( `ps ax|grep s3cmd|grep -vc grep` > 0 ));
+then
+        echo -e "[${RED}ERROR${NORMAL}]"
+        echo "s3CMD pid: $s3cmdpid"
+        kill -9 $s3cmdpid
+        if (( `echo $?` == 0 ));
+        then
+                        echo -n "Eucalyptus failed to connect restarting"
+                        service eucalyptus-cloud restart; >>/dev/null
+                        echo -e "[${GREEN}DONE${NORMAL}]"
+                        sleep 1800; ##Waiting for 30 mins for eucalyptus to start
+        fi
+else
+	echo -e "[${GREEN}OK${NORMAL}]"
+fi
+
+

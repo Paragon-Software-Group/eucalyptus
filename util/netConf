@@ -1,0 +1,128 @@
+#!/bin/sh
+RED='\033[0;31m'         #  ${RED}
+GREEN='\033[0;32m'      #  ${GREEN}
+NORMAL='\033[0m'
+CONFIGURED='7'      #exit code for configured iface
+configFolder=~/configs
+if [[ ! -n $0 ]];
+then
+	gdiHost=$0
+else
+	gdiHost="8.8.8.8"
+fi
+iFaces=ifaces.lst
+cd /etc/sysconfig/network-scripts
+rm -f ifcfg-eth*
+service network status | grep -A1 "active devices" | grep -v "devices" | sed "s/ /\n/g" >$configFolder/$iFaces
+echo -n "Reconfiguring network adapters"
+mainIface=`cat $configFolder/$iFaces | grep eth`
+echo "BOOTPROTO=dhcp
+NM_CONTROLLED=yes
+TYPE=Ethernet
+DEVICE=$mainIface
+ONBOOT=yes
+BRIDGE=br0">ifcfg-$mainIface
+echo -e "[${GREEN}DONE${NORMAL}]"
+cd ~
+echo -n "Restarting network service: "
+service network restart >>/dev/null
+echo -e "[${GREEN}DONE${NORMAL}]"
+
+sleep 1
+iFace="NULL"
+ip="0.0.0.0"
+for iFace in `cat $configFolder/$iFaces`;
+do
+        ifconfig $iFace up
+        echo -en "Checking interface: $iFace: "
+        if(( `ping -I $iFace -c 3 ${gdiHost} | grep -c "64 bytes from ${gdiHost}"` == 3 ));
+        then
+                echo -e "[${GREEN}SUCCESS${NORMAL}]"
+                echo "Interface with existing internet connection: $iFace";
+                break;
+        fi
+        echo -e "[${RED}FAILED${NORMAL}]"
+done
+if(( $iFace = "NULL" ))
+then
+
+                echo $iFace
+                echo "no Interfaces with internet connection"
+                exit -1
+else
+        if(( `ifconfig $iFace | grep "inet addr" | sed "s/.*inet addr://" | sed "s/  Bcast.*//" | wc -l` !=0 ));
+        then
+                ip=`ifconfig $iFace | grep "inet addr" | sed "s/.*inet addr://" | sed "s/  Bcast.*//"`;
+        else
+                echo "No ip found on interface $iFace; exiting. Try to find it manually"
+                exit -2;
+        fi
+fi
+echo "Ip found. Using $ip on interface $iFace"
+echo -n "Trying to apply $ip as walrus address: "
+eucaCount=`euca_conf --list-walruses | wc -l`
+if (( $eucaCount ==  0 | `euca_conf --list-walruses 2>>/dev/null | grep -c $ip` == 0 ));
+then
+	euca_conf --register-walrus $ip>>/dev/null 2>>/dev/null
+else
+	echo -e "${GREEN}Service is already configured${NORMAL}"
+	exit $CONFIGURED
+fi
+if(( $? == 0 ));
+then
+        echo -e "[${GREEN}DONE${NORMAL}]"
+        service eucalyptus-cloud restart>>/dev/null
+		sleep 1800;
+		echo -e "${GREEN}Walrus storage has successfully initiated${NORMAL}"
+else
+        echo -e "[${RED}FAILED${NORMAL}]"
+        echo -e "${RED}Error has been occurred. Please check your Eucalyptus installation${NORMAL}"
+fi
+echo "Configuring s3cmd utility to work with Walrus"
+mkdir ~/configs/
+echo -n "Please provide access key for your eucalyptus: "
+read access_key
+echo -n "\nPlease provide secret key for your eucalyptus: "
+read secret_key
+echo "[default]
+access_key = $access_key
+secret_key = $secret_key
+host_base = $ip:8773
+host_bucket = $ip:8773
+service_path = /services/Walrus
+bucket_location = US
+default_mime_type = binary/octet-stream
+delete_removed = False
+dry_run = False
+enable_multipart = True
+encoding = UTF-8
+encrypt = False
+follow_symlinks = False
+force = False
+get_continue = False
+gpg_command = /usr/bin/gpg
+gpg_decrypt = %(gpg_command)s -d --verbose --no-use-agent --batch --yes --passphrase-fd %(passphrase_fd)s -o %(output_file)s %(input_file)s
+gpg_encrypt = %(gpg_command)s -c --verbose --no-use-agent --batch --yes --passphrase-fd %(passphrase_fd)s -o %(output_file)s %(input_file)s
+gpg_passphrase =
+guess_mime_type = True
+human_readable_sizes = False
+invalidate_on_cf = False
+list_md5 = False
+log_target_prefix =
+mime_type =
+multipart_chunk_size_mb = 15
+preserve_attrs = True
+progress_meter = True
+proxy_host =
+proxy_port = 0
+recursive = False
+recv_chunk = 4096
+reduced_redundancy = False
+send_chunk = 4096
+skip_existing = False
+socket_timeout = 300
+urlencoding_mode = normal
+use_https = False
+verbosity = WARNING
+">~/configs/walrusCfg
+echo -e "\n[${GREEN}DONE${NORMAL}]"
