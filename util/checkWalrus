@@ -21,8 +21,7 @@ then
                         sleep 1800; ##Waiting for 30 mins for eucalyptus to start
         fi
 else
-echo -e "[${GREEN}OK${NORMAL}]"
-
+	echo -e "[${GREEN}OK${NORMAL}]"
 fi
 
 

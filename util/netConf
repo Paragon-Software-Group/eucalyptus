@@ -2,7 +2,14 @@
 RED='\033[0;31m'         #  ${RED}
 GREEN='\033[0;32m'      #  ${GREEN}
 NORMAL='\033[0m'
+CONFIGURED='7'      #exit code for configured iface
 configFolder=~/configs
+if [[ ! -n $0 ]];
+then
+	gdiHost=$0
+else
+	gdiHost="8.8.8.8"
+fi
 iFaces=ifaces.lst
 cd /etc/sysconfig/network-scripts
 rm -f ifcfg-eth*
@@ -28,7 +35,7 @@ for iFace in `cat $configFolder/$iFaces`;
 do
         ifconfig $iFace up
         echo -en "Checking interface: $iFace: "
-        if(( `ping -I $iFace -c 3 8.8.8.8 | grep -c "64 bytes from 8.8.8.8"` == 3 ));
+        if(( `ping -I $iFace -c 3 ${gdiHost} | grep -c "64 bytes from ${gdiHost}"` == 3 ));
         then
                 echo -e "[${GREEN}SUCCESS${NORMAL}]"
                 echo "Interface with existing internet connection: $iFace";
@@ -53,17 +60,23 @@ else
 fi
 echo "Ip found. Using $ip on interface $iFace"
 echo -n "Trying to apply $ip as walrus address: "
-euca_conf --register-walrus $ip>>/dev/null
+eucaCount=`euca_conf --list-walruses | wc -l`
+if (( $eucaCount ==  0 | `euca_conf --list-walruses 2>>/dev/null | grep -c $ip` == 0 ));
+then
+	euca_conf --register-walrus $ip>>/dev/null 2>>/dev/null
+else
+	echo -e "${GREEN}Service is already configured${NORMAL}"
+	exit $CONFIGURED
+fi
 if(( $? == 0 ));
 then
         echo -e "[${GREEN}DONE${NORMAL}]"
         service eucalyptus-cloud restart>>/dev/null
 		sleep 1800;
 		echo -e "${GREEN}Walrus storage has successfully initiated${NORMAL}"
-		
 else
         echo -e "[${RED}FAILED${NORMAL}]"
-        echo "${RED}Error has been occurred. Please check your Eucalyptus installation${NORMAL}"
+        echo -e "${RED}Error has been occurred. Please check your Eucalyptus installation${NORMAL}"
 fi
 echo "Configuring s3cmd utility to work with Walrus"
 mkdir ~/configs/
