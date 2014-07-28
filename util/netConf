@@ -23,6 +23,7 @@ TYPE=Ethernet
 DEVICE=$mainIface
 ONBOOT=yes">ifcfg-$mainIface
 dhclient $mainIface
+service network status | grep -A1 "active devices" | grep -v "devices" | sed "s/ /\n/g" >$configFolder/$iFaces
 echo -e "[${GREEN}DONE${NORMAL}]"
 cd ~
 echo -n "Restarting network service: "
@@ -62,7 +63,7 @@ else
 fi
 echo "Ip found. Using $ip on interface $iFace"
 echo -n "Trying to apply $ip as walrus address: "
-eucaCount=`euca_conf --list-walruses | wc -l`
+eucaCount=`euca_conf --list-walruses 2>>/dev/null | wc -l`
 if (( $eucaCount ==  0 | `euca_conf --list-walruses 2>>/dev/null | grep -c $ip` == 0 ));
 then
 	euca_conf --register-walrus $ip>>/dev/null 2>>/dev/null
