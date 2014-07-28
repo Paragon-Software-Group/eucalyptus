@@ -13,35 +13,37 @@ fi
 iFaces=ifaces.lst
 cd /etc/sysconfig/network-scripts
 rm -f ifcfg-eth*
-service network status | grep -A1 "active devices" | grep -v "devices" | sed "s/ /\n/g" >$configFolder/$iFaces
+service network restart>>/dev/null
+ifconfig -a | grep eth | sed "s/\ .*/\n/g" >$configFolder/$iFaces
 echo -n "Reconfiguring network adapters"
 mainIface=`cat $configFolder/$iFaces | grep eth`
 echo "BOOTPROTO=dhcp
 NM_CONTROLLED=yes
 TYPE=Ethernet
 DEVICE=$mainIface
-ONBOOT=yes
-BRIDGE=br0">ifcfg-$mainIface
+ONBOOT=yes">ifcfg-$mainIface
+dhclient $mainIface
 echo -e "[${GREEN}DONE${NORMAL}]"
 cd ~
 echo -n "Restarting network service: "
 service network restart >>/dev/null
 echo -e "[${GREEN}DONE${NORMAL}]"
-
 sleep 1
 iFace="NULL"
 ip="0.0.0.0"
 for iFace in `cat $configFolder/$iFaces`;
 do
         ifconfig $iFace up
+		
         echo -en "Checking interface: $iFace: "
         if(( `ping -I $iFace -c 3 ${gdiHost} | grep -c "64 bytes from ${gdiHost}"` == 3 ));
         then
-                echo -e "[${GREEN}SUCCESS${NORMAL}]"
+                echo -e " [${GREEN}SUCCESS${NORMAL}]"
                 echo "Interface with existing internet connection: $iFace";
                 break;
         fi
-        echo -e "[${RED}FAILED${NORMAL}]"
+        echo -e " [${RED}FAILED${NORMAL}]"
+		iFace="NULL"
 done
 if(( $iFace = "NULL" ))
 then
