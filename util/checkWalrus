@@ -15,10 +15,16 @@ then
         sleep 10;
         if (( `echo $?` == 0 ));
         then
-                        echo -n "Eucalyptus failed to connect restarting: "
-                        service eucalyptus-cloud restart >>/dev/null 2>>/dev/null
+                        echo "Eucalyptus failed to connect restarting: "
+                        service eucalyptus-cloud stop >>/dev/null 2>>/dev/null
+                        echo "Collecting logs"
+                        collectLogs
+                        echo "Done"
+                        echo -n "Starting eucalyptus   : "
+                        service eucalyptus-cloud start 2>>%1 1>>/dev/null
                         echo -e "[${GREEN}DONE${NORMAL}] \n Waiting 30 minutes eucalyptus to start"
                         sleep 1800; ##Waiting for 30 mins for eucalyptus to start
+
         fi
 else
 echo -e "[${GREEN}OK${NORMAL}]"
