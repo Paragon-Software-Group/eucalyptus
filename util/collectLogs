@@ -6,8 +6,11 @@ mkdir $logdir  2>>%1 1>>/dev/null
 date=`date +%H%M%S_%d%m%Y`
 logname=eucalyptus_$date.tar.gz
 cd /var/log/eucalyptus/
+mkdir log 2>>%1 1>>/dev/null
+cp * log 2>>%1 1>>/dev/null
+cd log
 tar -czvf $logdir/$logname *
 s3cmd put $logdir/$logname $distantFolder
 echo "Cleaning"
-rm -f /var/log/eucalyptus/*
+rm -rf /var/log/eucalyptus/*
 rm -f $logdir/$logname
