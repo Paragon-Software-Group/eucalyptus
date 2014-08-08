@@ -1,11 +1,12 @@
 #!/bin/sh
-RED='\033[0;31m'         #  ${RED}
-GREEN='\033[0;32m'      #  ${GREEN}
+RED='\033[0;31m'         ## ${RED}
+GREEN='\033[0;32m'      ##  ${GREEN}
 NORMAL='\033[0m'
-CONFIGURED='7'      #exit code for configured iface
+CONFIGURED='7'      ##exit code for configured iface
 
+##System Variables definition
 configFolder=~/configs
-mkdir $configFolder>>/dev/null 2>>/dev/null
+
 if [[ ! -n $0 ]];
 then
 	gdiHost=$0
@@ -13,30 +14,41 @@ else
 	gdiHost="8.8.8.8"
 fi
 iFaces=ifaces.lst
+
+
+##Cleaning old settings
+rm -rf $configFolder
+mkdir $configFolder>>/dev/null 2>>/dev/null
+
 cd /etc/sysconfig/network-scripts
-rm -f ifcfg-eth*
+rm -f ifcfg-eth*>>/dev/null 2>>/dev/null
+
+##Configuring interfaces
+echo -n "Configuring interfaces: "
 service network restart>>/dev/null 2>>/dev/null
-ifconfig -a | grep eth | sed "s/\ .*/\n/g" >$configFolder/$iFaces
-echo -n "Reconfiguring network adapters"
-mainIface=`cat $configFolder/$iFaces | grep eth`
+ifconfig -a | grep eth | sed "s/ .*//g" >> $configFolder/$iFaces
+for mainIface in `cat $configFolder/$iFaces | grep eth`;
+do
 echo "BOOTPROTO=dhcp
 NM_CONTROLLED=yes
 TYPE=Ethernet
 DEVICE=$mainIface
 ONBOOT=yes">ifcfg-$mainIface
-service network restart>>/dev/null 2>>/dev/null
-dhclient $mainIface
+done
 echo -e "[${GREEN}DONE${NORMAL}]"
+
+
+## Searching for interface with direct connection of GDI or internet
 cd ~
 echo -n "Restarting network service: "
-service network restart >>/dev/null
+service network restart >>/dev/null 2>>/dev/null
 echo -e "[${GREEN}DONE${NORMAL}]"
 sleep 1
 iFace="NULL"
 ip="0.0.0.0"
 for iFace in `cat $configFolder/$iFaces`;
 do
-        ifconfig $iFace up
+        ifconfig $iFace up>>/dev/null 2>>/dev/null
         echo -en "Checking interface: $iFace: "
         if(( `ping -I $iFace -c 3 ${gdiHost} | grep -c "64 bytes from ${gdiHost}"` == 3 ));
         then
@@ -63,8 +75,12 @@ else
         fi
 fi
 echo "Ip found. Using $ip on interface $iFace"
+
+
+
+##Walrus initialization
 echo -n "Trying to apply $ip as walrus address: "
-eucaCount=`euca_conf --list-walruses 2>>/dev/null | wc -l`
+eucaCount=`euca_conf --list-walruses>>/dev/null 2>>/dev/null | wc -l`
 if(( $? != 0 ));
 then
 	echo "Walrus couldn't be configured because Eucalyptus cloud service has not initialized yet. 
@@ -88,9 +104,16 @@ then
 		echo -e "${GREEN}Walrus storage has successfully initiated${NORMAL}"
 else
         echo -e "[${RED}FAILED${NORMAL}]"
-        echo -e "${RED}Error has been occurred. Please check your Eucalyptus installation${NORMAL}"
+        echo -e "${RED}Walrus couldn't be configured because Eucalyptus cloud service has not initialized yet. 
+Start the Eucalyptus cloud by running:
+service eucalyptus-cloud start
+Wait approx 15 minutes for its 'warm-up'${NORMAL}"
 		exit -2
 fi
+
+
+
+#Walrus self check script configuration
 echo "Configuring Walrus self-check. "
 echo "Please login to Web Console at https://$ip:8443 to get Walrus access keys. See  Walrus Storage user guide for more info."
 echo -n "Please provide access key for your eucalyptus: "
