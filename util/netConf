@@ -5,7 +5,7 @@ NORMAL='\033[0m'
 CONFIGURED='7'      #exit code for configured iface
 
 configFolder=~/configs
-mkdir $configFolder
+mkdir $configFolder>>/dev/null 2>>/dev/null
 if [[ ! -n $0 ]];
 then
 	gdiHost=$0
@@ -58,13 +58,21 @@ else
         then
                 ip=`ifconfig $iFace | grep "inet addr" | sed "s/.*inet addr://" | sed "s/  Bcast.*//"`;
         else
-                echo "No ip found on interface $iFace; exiting. Try to find it manually"
+                echo "No ip found on interface $iFace; exiting. Try to find configure it manually manually"
                 exit -2;
         fi
 fi
 echo "Ip found. Using $ip on interface $iFace"
 echo -n "Trying to apply $ip as walrus address: "
 eucaCount=`euca_conf --list-walruses 2>>/dev/null | wc -l`
+if(( $? != 0 ));
+then
+	echo "Walrus couldn't be configured because Eucalyptus cloud service has not initialized yet. 
+Start the Eucalyptus cloud by running:
+service eucalyptus-cloud start
+Wait approx 15 minutes for its 'warm-up'"
+	exit -3
+fi
 if (( $eucaCount ==  0 | `euca_conf --list-walruses 2>>/dev/null | grep -c $ip` == 0 ));
 then
 	euca_conf --register-walrus $ip>>/dev/null 2>>/dev/null
@@ -81,8 +89,10 @@ then
 else
         echo -e "[${RED}FAILED${NORMAL}]"
         echo -e "${RED}Error has been occurred. Please check your Eucalyptus installation${NORMAL}"
+		exit -2
 fi
-echo "Configuring s3cmd utility to work with Walrus"
+echo "Configuring Walrus self-check. "
+echo "Please login to Web Console at https://$ip:8443 to get Walrus access keys. See  Walrus Storage user guide for more info."
 echo -n "Please provide access key for your eucalyptus: "
 read access_key
 echo -n "\nPlease provide secret key for your eucalyptus: "
