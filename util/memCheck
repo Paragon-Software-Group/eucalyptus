@@ -1,0 +1,13 @@
+#!/bin/sh
+memory_log=/var/log/eucalyptus/system_memory.log
+if (( ` find $memory_log | wc -l` == '1' ));
+then
+	echo "`date +%b\ %d\ %H:%M:%S` |  `free -o | grep total`" >>$memory_log
+	echo "`date +%b\ %d\ %H:%M:%S` |  `free -o | grep Mem`" >>$memory_log
+else
+	touch /var/log/eucalyptus/system_memory.log
+	echo "`date +%b\ %d\ %H:%M:%S` | Memory log initialized">>$memory_log
+	echo "`date +%b\ %d\ %H:%M:%S` |  `free -o | grep total`" >>$memory_log
+	echo "`date +%b\ %d\ %H:%M:%S` |  `free -o | grep Mem`" >>$memory_log
+	
+fi

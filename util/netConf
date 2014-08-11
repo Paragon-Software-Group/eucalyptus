@@ -9,9 +9,27 @@ configFolder=~/configs
 
 if [[ ! -n $0 ]];
 then
-	gdiHost=$0
+	if(( $0 != "0" ));
+	then
+		gdiHost=$0
+	else
+		gdiHost="8.8.8.8"
+	fi
 else
 	gdiHost="8.8.8.8"
+fi
+
+if [[ ! -n $1 ]];
+then
+	if(( $1 != "0" ));
+	then
+		memJava=$1
+	else
+		memJava="2048m"
+	fi
+	
+else
+	memJava="2048m"
 fi
 iFaces=ifaces.lst
 
@@ -161,4 +179,10 @@ urlencoding_mode = normal
 use_https = False
 verbosity = WARNING
 ">~/configs/walrusCfg
+echo -e "\n[${GREEN}DONE${NORMAL}]"
+
+#Eucalyptus Java Configuration
+cp /etc/eucalyptus/eucalyptus.conf /etc/eucalyptus/eucalyptus.conf.backup
+echo "Seting java limits to $memJava "
+cat /etc/eucalyptus/eucalyptus.conf | sed "s/CLOUD_OPTS=\"\"/CLOUD_OPTS=\"-Xmx$memJava\"/">/etc/eucalyptus/eucalyptus.conf
 echo -e "\n[${GREEN}DONE${NORMAL}]"
