@@ -1,16 +1,22 @@
 #!/bin/sh
 logdir=~/logs/
-distantFolder=s3://logs/ 2>>%1 1>>/dev/null
-s3cmd mb $distantFolder
-mkdir $logdir  2>>%1 1>>/dev/null
-date=`date +%H%M%S_%d%m%Y`
+distantFolder=s3://logs
+if [[ ! -n $0 ]];
+then
+	date=`date +%H%M%S_%d%m%Y`
+else
+	date=`0`
 logname=eucalyptus_$date.tar.gz
+
+
+mkdir $logdir  2>>%1 1>>/dev/null
+
 cd /var/log/eucalyptus/
 mkdir log 2>>%1 1>>/dev/null
 cp * log 2>>%1 1>>/dev/null
 cd log
 tar -czvf $logdir/$logname *
-s3cmd put $logdir/$logname $distantFolder
-echo "Cleaning"
+
+echo "Cleaning old logs"
 rm -rf /var/log/eucalyptus/*
-rm -f $logdir/$logname
+##rm -f $logdir/$logname

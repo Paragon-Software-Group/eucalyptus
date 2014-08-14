@@ -1,0 +1,10 @@
+#!/bin/bash
+service eucalyptus-cloud stop
+collectLogs
+service eucalyptus-cloud start
+s3cmd ls
+while (( $? != 0 ));
+do
+	s3cmd ls >>/dev/null 2>>%1
+done
+uploadLogs

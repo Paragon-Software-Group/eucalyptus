@@ -1,0 +1,23 @@
+#!/bin/sh
+
+logdir=~/logs/
+distantFolder=s3://logs
+date=$0
+logname=eucalyptus_$date.tar.gz
+
+#trying to connect 
+s3cmd ls >>/dev/null 2>>%1
+if (( $? != 0 ));
+then
+	echo "No active storage is present"
+	exit -1;
+fi
+
+#check if bucket is already exists
+if (( `s3cmd -ls|grep $distantFolder |ws -l` == 0 ));
+then
+	s3cmd mb $distantFolder 2>>%1 1>>/dev/null
+fi
+
+#uploading Data to the bucket
+s3cmd put $logdir/$logname $distantFolder 2>>%1 1>>/dev/null
