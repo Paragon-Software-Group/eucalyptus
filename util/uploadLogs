@@ -1,12 +1,13 @@
 #!/bin/sh
-
+sleep 200
 logdir=~/logs/
 distantFolder=s3://logs
-date=$0
+date=$1
 logname=eucalyptus_$date.tar.gz
 
-#trying to connect 
-s3cmd ls >>/dev/null 2>>%1
+#trying to connect
+echo "Getting s3cmd bucket list"
+s3cmd ls
 if (( $? != 0 ));
 then
 	echo "No active storage is present"
@@ -14,10 +15,13 @@ then
 fi
 
 #check if bucket is already exists
-if (( `s3cmd -ls|grep $distantFolder |ws -l` == 0 ));
+if (( `s3cmd ls|grep $distantFolder | wc -l` == 0 ));
 then
-	s3cmd mb $distantFolder 2>>%1 1>>/dev/null
+	echo "$distantFolder not present creating"
+	s3cmd mb $distantFolder
+	pkill -9 s3cmd 
 fi
 
 #uploading Data to the bucket
-s3cmd put $logdir/$logname $distantFolder 2>>%1 1>>/dev/null
+echo "Uploading logs"
+s3cmd put $logdir/$logname $distantFolder

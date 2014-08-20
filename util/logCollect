@@ -1,0 +1,12 @@
+#!/bin/sh
+logdir=~/logs/
+mkdir $logdir  2>>%1 1>>/dev/null
+date=`date +%H%M%S_%d%m%Y`
+logname=eucalyptus_$date.tar.gz
+distantFolder=s3://logs/
+cd /var/log/eucalyptus/
+tar -czvf $logdir/$logname *
+s3cmd put $logdir/$logname $distantFolder
+echo "Cleaning"
+rm -f /var/log/eucalyptus/*
+rm -f $logdir/$logname

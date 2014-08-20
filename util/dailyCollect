@@ -1,10 +1,20 @@
 #!/bin/bash
+dateTime=`date +%H%M%S_%d%m%Y`
+date=`date +%d%m%Y`
+echo "Stopping eucalyptus cloud for log collection" 
 service eucalyptus-cloud stop
-collectLogs
+collectLogs $dateTime
+echo "Cleaning old euca logs"
+rm -rf /var/log/eucalyptus/*
 service eucalyptus-cloud start
-s3cmd ls
+s3cmd ls >>/dev/null 2>>/dev/null
 while (( $? != 0 ));
-do
-	s3cmd ls >>/dev/null 2>>%1
+do >> ~/logs/dailyCollect/log_$date
+	sleep 5
+	if (( `ps ax | grep s3cmd | grep -v grep | wc -l` != 0 ));
+	then
+	pkill -9 s3cmd
+	fi 
+	s3cmd ls &  >>/dev/null 2>>/dev/null 
 done
-uploadLogs
+uploadLogs $dateTime
