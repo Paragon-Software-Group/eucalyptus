@@ -6,4 +6,4 @@ then
 else
 	memJava="2048m"
 fi
-cat /etc/eucalyptus/eucalyptus.conf | sed "s/CLOUD_OPTS=\".*\"/CLOUD_OPTS=\"$memJava\"/">/etc/eucalyptus/eucalyptus.conf
+cat /etc/eucalyptus/eucalyptus.conf | sed "s/CLOUD_OPTS=\".*\"/CLOUD_OPTS=\"-Xmx $memJava\"/">/etc/eucalyptus/eucalyptus.conf
