@@ -1,6 +1,5 @@
 #!/bin/sh
-
-[[ ! -n $0 ]];
+if [[ ! -n $0 ]];
 then
 	memJava=$0
 else
