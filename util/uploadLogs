@@ -6,6 +6,7 @@ date=$1
 logname=eucalyptus_$date.tar.gz
 
 #trying to connect
+mkdir $logdir >>/dev/null 2>>/dev/null
 echo "Getting s3cmd bucket list"
 s3cmd ls
 if (( $? != 0 ));

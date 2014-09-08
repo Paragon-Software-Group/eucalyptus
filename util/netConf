@@ -5,13 +5,13 @@ NORMAL='\033[0m'
 CONFIGURED='7'      #exit code for configured iface
 configFolder=~/configs
 mkdir $configFolder >>/dev/null 2>>/dev/null
-if [[ ! -n $0 ]];
+if [[ ! -n $1 ]];
 then
 gdiHost="8.8.8.8"
 else
-		if(( "$0" != "0" ));
+		if(( "$1" != "0" ));
 	then
-		gdiHost=$0
+		gdiHost=$1
 	else
 		gdiHost="8.8.8.8"
 	fi
@@ -21,9 +21,9 @@ if [[ ! -n $1 ]];
 then
 	memJava="2048m"
 else
-	if(( "$1" != "0" ));
+	if(( "$2" != "0" ));
 	then
-		memJava=$1
+		memJava=$2
 	else
 		memJava="2048m"
 	fi
@@ -33,16 +33,17 @@ touch $iFaces
 cd /etc/sysconfig/network-scripts
 rm -f ifcfg-
 rm -f ifcfg-eth*
-service network restart>>/dev/null 2>>/dev/null
+service network restart >>/dev/null 2>>/dev/null
 ifconfig -a | grep eth | sed "s/\ .*//g" >$configFolder/$iFaces
 echo -n "Reconfiguring network adapters"
+cp /etc/eucaliptus/eucalyptus.conf.rpmnew /etc/eucaliptus/eucalyptus.conf
 mainIface=`cat $configFolder/$iFaces | grep eth`
 echo "BOOTPROTO=dhcp
 NM_CONTROLLED=yes
 TYPE=Ethernet
 DEVICE=$mainIface
 ONBOOT=yes">ifcfg-$mainIface
-dhclient $mainIface
+dhclient $mainIface >>/dev/null 2>>/dev/null
 service network status | grep -A1 "active devices" | grep -v "devices" | sed "s/ /\n/g" >$configFolder/$iFaces
 echo -e "[${GREEN}DONE${NORMAL}]"
 cd ~

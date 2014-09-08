@@ -5,10 +5,9 @@ if [[ ! -n $0 ]];
 then
 	date=`date +%H%M%S_%d%m%Y`
 else
-	date=`0`
+	date="0"
+fi
 logname=eucalyptus_$date.tar.gz
-
-
 mkdir $logdir  2>>%1 1>>/dev/null
 
 cd /var/log/eucalyptus/
