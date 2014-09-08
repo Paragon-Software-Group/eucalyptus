@@ -4,35 +4,37 @@ GREEN='\033[0;32m'      #  ${GREEN}
 NORMAL='\033[0m'
 CONFIGURED='7'      #exit code for configured iface
 configFolder=~/configs
+mkdir $configFolder >>/dev/null 2>>/dev/null
 if [[ ! -n $0 ]];
 then
-	if(( $0 != "0" ));
+gdiHost="8.8.8.8"
+else
+		if(( "$0" != "0" ));
 	then
 		gdiHost=$0
 	else
 		gdiHost="8.8.8.8"
 	fi
-else
-	gdiHost="8.8.8.8"
 fi
 
 if [[ ! -n $1 ]];
 then
-	if(( $1 != "0" ));
+	memJava="2048m"
+else
+	if(( "$1" != "0" ));
 	then
 		memJava=$1
 	else
 		memJava="2048m"
 	fi
-	
-else
-	memJava="2048m"
 fi
 iFaces=ifaces.lst
+touch $iFaces
 cd /etc/sysconfig/network-scripts
+rm -f ifcfg-
 rm -f ifcfg-eth*
-service network restart>>/dev/null
-ifconfig -a | grep eth | sed "s/\ .*/\n/g" >$configFolder/$iFaces
+service network restart>>/dev/null 2>>/dev/null
+ifconfig -a | grep eth | sed "s/\ .*//g" >$configFolder/$iFaces
 echo -n "Reconfiguring network adapters"
 mainIface=`cat $configFolder/$iFaces | grep eth`
 echo "BOOTPROTO=dhcp
@@ -45,7 +47,7 @@ service network status | grep -A1 "active devices" | grep -v "devices" | sed "s/
 echo -e "[${GREEN}DONE${NORMAL}]"
 cd ~
 echo -n "Restarting network service: "
-service network restart >>/dev/null
+service network restart >>/dev/null 2>>/dev/null
 echo -e "[${GREEN}DONE${NORMAL}]"
 sleep 1
 iFace="NULL"
@@ -68,7 +70,7 @@ if(( $iFace = "NULL" ))
 then
 
                 echo $iFace
-                echo "no Interfaces with internet connection"
+                echo "no Interfaces with connection"
                 exit -1
 else
         if(( `ifconfig $iFace | grep "inet addr" | sed "s/.*inet addr://" | sed "s/  Bcast.*//" | wc -l` !=0 ));

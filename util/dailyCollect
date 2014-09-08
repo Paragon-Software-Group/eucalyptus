@@ -3,13 +3,15 @@ dateTime=`date +%H%M%S_%d%m%Y`
 date=`date +%d%m%Y`
 echo "Stopping eucalyptus cloud for log collection" 
 service eucalyptus-cloud stop
+echo "Waiting for complete stop of euca services"
+sleep 180
 collectLogs $dateTime
 echo "Cleaning old euca logs"
 rm -rf /var/log/eucalyptus/*
 service eucalyptus-cloud start
 s3cmd ls >>/dev/null 2>>/dev/null
 while (( $? != 0 ));
-do >> ~/logs/dailyCollect/log_$date
+do 
 	sleep 5
 	if (( `ps ax | grep s3cmd | grep -v grep | wc -l` != 0 ));
 	then
