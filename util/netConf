@@ -10,7 +10,6 @@ NOARGS=1
 HELP=2
 function networkConf() {
 echo -n "Reconfiguring network adapters"
-for 
 for $mainIface in `cat $configFolder/$iFaces | grep eth`;
 do
 	echo "BOOTPROTO=dhcp
