@@ -183,12 +183,16 @@ echo -e "\n[${GREEN}DONE${NORMAL}]"
 }
 
 function help {
-    echo "Network configuration script"
+    echo "Walrus network configuration script"
+    echo "Configures local network interfaces, regsiters Walrus to operate on one of them."
 	echo "Possible options:"
 	echo "netConf [gdi-host-ip|conf] [memory limit]"
-	echo "if gdi-host-ip set to \"0\" interfaces configuring according \"8.8.8.8\" address"
-	echo "Memory limit is set according JAVA specifications. set's as -Xmx setting"
-	echo "\"netConf\" conf configures s3cmd service for correct work"
+	echo "gdi-host-ip - outbound IP address that Walrus should be reachable from."
+	echo "    Enter your GDI server or client IP address."
+	echo "    Script will choose NIC to associate Walrus with depending on this address."
+	echo "    If gdi-host-ip set to \"0\" interfaces configuring according \"8.8.8.8\" address"
+	echo "memory limit - RAM limit for Walrus. "
+	echo "    It modifies JAVA options, the -Xmx setting"
 }
 function javaConf{
 #Eucalyptus Java Configuration
