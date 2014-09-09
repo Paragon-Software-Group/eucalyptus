@@ -7,10 +7,11 @@ INITFAIL=3      #exit code on initialize walrus
 IPNOTFOUND=-2
 NOCONN=-1
 NOARGS=1
+HELP=2
 
 while getopts "hg:m:" opt; do
      case $opt in
-         h) echo "Usage: `basename $0` options (-g gdi-ip) (-m memory value) -h for help";;
+         h) echo "Usage: `basename $0` options (-g gdi-ip) (-m memory value) -h for help"; exit $HELP;;
 		 g)gdiHost=$OPTARG;;
 		 m)memJava=$OPTARG;;
      esac
