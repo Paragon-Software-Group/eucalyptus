@@ -113,12 +113,12 @@ else
         then
                 ip=`ifconfig $iFace | grep "inet addr" | sed "s/.*inet addr://" | sed "s/  Bcast.*//"`;
         else
-                echo "No ip found on interface $iFace; exiting. Try to find it manually"
+                echo "No IP found on interface $iFace; exiting. Please, configure IP manually and restart netConf"
                 exit $IPNOTFOUND;
         fi
 fi
-echo "Ip found. Using $ip on interface $iFace"
-echo -n "Trying to apply $ip as walrus address: "
+echo "IP found. Using $ip on interface $iFace"
+echo -n "Applying $ip as walrus address: "
 eucaCount=`euca_conf --list-walruses 2>>/dev/null | wc -l`
 if (( $eucaCount ==  0 | `euca_conf --list-walruses 2>>/dev/null | grep -c $ip` == 0 ));
 then
@@ -135,16 +135,18 @@ then
 		echo -e "${GREEN}Walrus storage has successfully initiated${NORMAL}"
 else
         echo -e "[${RED}FAILED${NORMAL}]"
-        echo -e "${RED}Error has been occurred. Please check your Eucalyptus installation${NORMAL}"
+        echo -e "${RED}Failed to configure Walrus storage. Please consult Walrus User Guide to troubleshoot the error.${NORMAL}"
 		exit $INITFAIL
 fi
 }
 function s3cfg {
-echo "Configuring s3cmd utility to work with Walrus"
+echo "Configuring utilities to monitor storage."
+echo "You will be prompted to enter keys to access the storage"
+echo "Please, consult Walrus User Guide on ways to obtain keys"
 mkdir ~/configs/
-echo -n "Please provide access key for your eucalyptus: "
+echo -n "Please provide Access Key for your storage: "
 read access_key
-echo -n "\nPlease provide secret key for your eucalyptus: "
+echo -n "\nPlease provide Secret key for your storage: "
 read secret_key
 echo "[default]
 access_key = $access_key
