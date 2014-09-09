@@ -132,7 +132,6 @@ verbosity = WARNING
 ">~/configs/walrusCfg
 echo -e "\n[${GREEN}DONE${NORMAL}]"
 }
-
 function help() {
     echo "Walrus network configuration script"
     echo "Configures local network interfaces, regsiters Walrus to operate on one of them."
@@ -157,10 +156,10 @@ echo -e "\n[${GREEN}DONE${NORMAL}]"
 
 while getopts "hcg:m:" opt; do
      case $opt in
-         h)echo "Usage: `basename $0` options (-g gdi-ip) (-m memory value) -h for help"; help;exit $HELP;;
+         h)help;exit $HELP;;
 		 g)gdiHost=$OPTARG;;
 		 m)memJava=$OPTARG;;
-		 c)s3cfg(); exit $CONFIGURED;;
+		 c)s3cfg; exit $CONFIGURED;;
      esac
 done
 
