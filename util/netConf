@@ -8,55 +8,7 @@ IPNOTFOUND=-2
 NOCONN=-1
 NOARGS=1
 HELP=2
-
-while getopts "hg:m:" opt; do
-     case $opt in
-         h) echo "Usage: `basename $0` options (-g gdi-ip) (-m memory value) -h for help"; exit $HELP;;
-		 g)gdiHost=$OPTARG;;
-		 m)memJava=$OPTARG;;
-     esac
-done
-
-if ( ! getopts "hg:m:" opt); then
-	echo "Default mode enabled\n GDI-host set to \"8.8.8.8\"\n max java memory: \"2048m\""
-	gdiHost="8.8.8.8"
-	memJava="2048m"	
-fi
-
-
-configFolder=~/configs
-mkdir $configFolder >>/dev/null 2>>/dev/null
-iFaces=ifaces.lst
-touch $iFaces
-cd /etc/sysconfig/network-scripts
-rm -f ifcfg-
-rm -f ifcfg-eth*
-service network restart >>/dev/null 2>>/dev/null
-ifconfig -a | grep eth | sed "s/\ .*//g" >$configFolder/$iFaces
-cp -f /etc/eucaliptus/eucalyptus.conf.rpmnew /etc/eucaliptus/eucalyptus.conf >>/dev/null 2>>/dev/null
-
-##Configuring network adapters
-##----------------------------------------------------------------------------------------
-networkConf
-
-
-##Configuring s3 cmd utility
-##----------------------------------------------------------------------------------------
-s3cfg
-
-##Configuring java parameters
-##----------------------------------------------------------------------------------------
-javaConf $memJava
-
-
-
-
-
-
-
-
-function networkConf
-{
+function networkConf() {
 echo -n "Reconfiguring network adapters"
 for 
 for $mainIface in `cat $configFolder/$iFaces | grep eth`;
@@ -129,7 +81,7 @@ else
 		exit $INITFAIL
 fi
 }
-function s3cfg {
+function s3cfg() {
 echo "Configuring utilities to monitor storage."
 echo "You will be prompted to enter keys to access the storage"
 echo "Please, consult Walrus User Guide on ways to obtain keys"
@@ -182,7 +134,7 @@ verbosity = WARNING
 echo -e "\n[${GREEN}DONE${NORMAL}]"
 }
 
-function help {
+function help() {
     echo "Walrus network configuration script"
     echo "Configures local network interfaces, regsiters Walrus to operate on one of them."
 	echo "Possible options:"
@@ -194,7 +146,7 @@ function help {
 	echo "memory limit - RAM limit for Walrus. "
 	echo "    It modifies JAVA options, the -Xmx setting"
 }
-function javaConf{
+function javaConf() {
 #Eucalyptus Java Configuration
 memJava=$1
 cp /etc/eucalyptus/eucalyptus.conf /etc/eucalyptus/eucalyptus.conf.backup >>/dev/null 2>>/dev/null
@@ -202,3 +154,50 @@ echo "Seting java limits to $memJava :"
 cat /etc/eucalyptus/eucalyptus.conf | sed "s/CLOUD_OPTS=\"\"/CLOUD_OPTS=\"-Xmx$memJava\"/">/etc/eucalyptus/eucalyptus.conf
 echo -e "\n[${GREEN}DONE${NORMAL}]"
 }
+
+while getopts "hg:m:" opt; do
+     case $opt in
+         h) echo "Usage: `basename $0` options (-g gdi-ip) (-m memory value) -h for help"; help;exit $HELP;;
+		 g)gdiHost=$OPTARG;;
+		 m)memJava=$OPTARG;;
+     esac
+done
+
+if ( ! getopts "hg:m:" opt); then
+	echo "Default mode enabled\n GDI-host set to \"8.8.8.8\"\n max java memory: \"2048m\""
+	gdiHost="8.8.8.8"
+	memJava="2048m"	
+fi
+
+
+configFolder=~/configs
+mkdir $configFolder >>/dev/null 2>>/dev/null
+iFaces=ifaces.lst
+touch $iFaces
+cd /etc/sysconfig/network-scripts
+rm -f ifcfg-
+rm -f ifcfg-eth*
+service network restart >>/dev/null 2>>/dev/null
+ifconfig -a | grep eth | sed "s/\ .*//g" >$configFolder/$iFaces
+cp -f /etc/eucaliptus/eucalyptus.conf.rpmnew /etc/eucaliptus/eucalyptus.conf >>/dev/null 2>>/dev/null
+
+##Configuring network adapters
+##----------------------------------------------------------------------------------------
+networkConf
+
+
+##Configuring s3 cmd utility
+##----------------------------------------------------------------------------------------
+s3cfg
+
+##Configuring java parameters
+##----------------------------------------------------------------------------------------
+javaConf $memJava
+
+
+
+
+
+
+
+
