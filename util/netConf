@@ -164,7 +164,9 @@ while getopts "hcg:m:" opt; do
 done
 
 if ( ! getopts "hcg:m:" opt); then
-	echo "Default mode enabled\n GDI-host set to \"8.8.8.8\"\n max java memory: \"2048m\""
+	echo "Default mode enabled
+	GDI-host set to \"8.8.8.8\"
+	max java memory: \"2048m\""
 	gdiHost="8.8.8.8"
 	memJava="2048m"	
 fi
