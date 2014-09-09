@@ -2,22 +2,28 @@
 RED='\033[0;31m'         #  ${RED}
 GREEN='\033[0;32m'      #  ${GREEN}
 NORMAL='\033[0m'
-CONFIGURED='7'      #exit code for configured iface
-configFolder=~/configs
-mkdir $configFolder >>/dev/null 2>>/dev/null
-if [[ ! -n $1 ]];
-then
-gdiHost="8.8.8.8"
-else
-		if(( "$1" != "0" ));
-	then
-		gdiHost=$1
-	else
-		gdiHost="8.8.8.8"
-	fi
+CONFIGURED=7      #exit code for configured iface
+INITFAIL=3      #exit code on initialize walrus
+IPNOTFOUND=-2
+NOCONN=-1
+NOARGS=1
+
+if [ $# -eq 0 ]; then
+	help
+    exit $NOARGS
 fi
 
-if [[ ! -n $1 ]];
+configFolder=~/configs
+mkdir $configFolder >>/dev/null 2>>/dev/null
+
+if(( "$1" != "0" ));
+then
+	gdiHost=$1
+else
+	gdiHost="8.8.8.8"
+fi
+
+if [[ ! -n $2 ]];
 then
 	memJava="2048m"
 else
@@ -28,6 +34,8 @@ else
 		memJava="2048m"
 	fi
 fi
+
+
 iFaces=ifaces.lst
 touch $iFaces
 cd /etc/sysconfig/network-scripts
@@ -35,15 +43,42 @@ rm -f ifcfg-
 rm -f ifcfg-eth*
 service network restart >>/dev/null 2>>/dev/null
 ifconfig -a | grep eth | sed "s/\ .*//g" >$configFolder/$iFaces
+cp -f /etc/eucaliptus/eucalyptus.conf.rpmnew /etc/eucaliptus/eucalyptus.conf >>/dev/null 2>>/dev/null
+
+##Configuring network adapters
+##----------------------------------------------------------------------------------------
+networkConf
+
+
+##Configuring s3 cmd utility
+##----------------------------------------------------------------------------------------
+s3cfg
+
+##Configuring java parameters
+##----------------------------------------------------------------------------------------
+javaConf $memJava
+
+
+
+
+
+
+
+
+function networkConf
+{
 echo -n "Reconfiguring network adapters"
-cp /etc/eucaliptus/eucalyptus.conf.rpmnew /etc/eucaliptus/eucalyptus.conf
-mainIface=`cat $configFolder/$iFaces | grep eth`
-echo "BOOTPROTO=dhcp
+for 
+for $mainIface in `cat $configFolder/$iFaces | grep eth`;
+do
+	echo "BOOTPROTO=dhcp
 NM_CONTROLLED=yes
 TYPE=Ethernet
 DEVICE=$mainIface
 ONBOOT=yes">ifcfg-$mainIface
-dhclient $mainIface >>/dev/null 2>>/dev/null
+	dhclient $mainIface >>/dev/null 2>>/dev/null
+done
+rm -f rm -f ifcfg-
 service network status | grep -A1 "active devices" | grep -v "devices" | sed "s/ /\n/g" >$configFolder/$iFaces
 echo -e "[${GREEN}DONE${NORMAL}]"
 cd ~
@@ -72,14 +107,14 @@ then
 
                 echo $iFace
                 echo "no Interfaces with connection"
-                exit -1
+                exit $NOCONN
 else
         if(( `ifconfig $iFace | grep "inet addr" | sed "s/.*inet addr://" | sed "s/  Bcast.*//" | wc -l` !=0 ));
         then
                 ip=`ifconfig $iFace | grep "inet addr" | sed "s/.*inet addr://" | sed "s/  Bcast.*//"`;
         else
                 echo "No ip found on interface $iFace; exiting. Try to find it manually"
-                exit -2;
+                exit $IPNOTFOUND;
         fi
 fi
 echo "Ip found. Using $ip on interface $iFace"
@@ -95,13 +130,16 @@ fi
 if(( $? == 0 ));
 then
         echo -e "[${GREEN}DONE${NORMAL}]"
-        service eucalyptus-cloud restart>>/dev/null
+        service eucalyptus-cloud restart>>/dev/null 2>>/dev/null
 		sleep 1800;
 		echo -e "${GREEN}Walrus storage has successfully initiated${NORMAL}"
 else
         echo -e "[${RED}FAILED${NORMAL}]"
         echo -e "${RED}Error has been occurred. Please check your Eucalyptus installation${NORMAL}"
+		exit $INITFAIL
 fi
+}
+function s3cfg {
 echo "Configuring s3cmd utility to work with Walrus"
 mkdir ~/configs/
 echo -n "Please provide access key for your eucalyptus: "
@@ -150,9 +188,21 @@ use_https = False
 verbosity = WARNING
 ">~/configs/walrusCfg
 echo -e "\n[${GREEN}DONE${NORMAL}]"
+}
 
+function help {
+    echo "Network configuration script"
+	echo "Possible options:"
+	echo "netConf [gdi-host-ip|conf] [memory limit]"
+	echo "if gdi-host-ip set to \"0\" interfaces configuring according \"8.8.8.8\" address"
+	echo "Memory limit is set according JAVA specifications. set's as -Xmx setting"
+	echo "\"netConf\" conf configures s3cmd service for correct work"
+}
+function javaConf{
 #Eucalyptus Java Configuration
-cp /etc/eucalyptus/eucalyptus.conf /etc/eucalyptus/eucalyptus.conf.backup
-echo "Seting java limits to $memJava "
+memJava=$1
+cp /etc/eucalyptus/eucalyptus.conf /etc/eucalyptus/eucalyptus.conf.backup >>/dev/null 2>>/dev/null
+echo "Seting java limits to $memJava :"
 cat /etc/eucalyptus/eucalyptus.conf | sed "s/CLOUD_OPTS=\"\"/CLOUD_OPTS=\"-Xmx$memJava\"/">/etc/eucalyptus/eucalyptus.conf
 echo -e "\n[${GREEN}DONE${NORMAL}]"
+}
