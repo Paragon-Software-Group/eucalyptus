@@ -137,13 +137,14 @@ function help() {
     echo "Walrus network configuration script"
     echo "Configures local network interfaces, regsiters Walrus to operate on one of them."
 	echo "Possible options:"
-	echo "netConf [gdi-host-ip|conf] [memory limit]"
+	echo "netConf [-c][-g gdi-host-ip] [-m memory_limit]"
 	echo "gdi-host-ip - outbound IP address that Walrus should be reachable from."
 	echo "    Enter your GDI server or client IP address."
 	echo "    Script will choose NIC to associate Walrus with depending on this address."
 	echo "    If gdi-host-ip set to \"0\" interfaces configuring according \"8.8.8.8\" address"
-	echo "memory limit - RAM limit for Walrus. "
+	echo "memory_limit - RAM limit for Walrus. "
 	echo "    It modifies JAVA options, the -Xmx setting"
+	echo "-c option runs s3cmd configuration"
 }
 function javaConf() {
 #Eucalyptus Java Configuration
@@ -154,15 +155,16 @@ cat /etc/eucalyptus/eucalyptus.conf | sed "s/CLOUD_OPTS=\"\"/CLOUD_OPTS=\"-Xmx$m
 echo -e "\n[${GREEN}DONE${NORMAL}]"
 }
 
-while getopts "hg:m:" opt; do
+while getopts "hcg:m:" opt; do
      case $opt in
-         h) echo "Usage: `basename $0` options (-g gdi-ip) (-m memory value) -h for help"; help;exit $HELP;;
+         h)echo "Usage: `basename $0` options (-g gdi-ip) (-m memory value) -h for help"; help;exit $HELP;;
 		 g)gdiHost=$OPTARG;;
 		 m)memJava=$OPTARG;;
+		 c)s3cfg(); exit $CONFIGURED;;
      esac
 done
 
-if ( ! getopts "hg:m:" opt); then
+if ( ! getopts "hcg:m:" opt); then
 	echo "Default mode enabled\n GDI-host set to \"8.8.8.8\"\n max java memory: \"2048m\""
 	gdiHost="8.8.8.8"
 	memJava="2048m"	
