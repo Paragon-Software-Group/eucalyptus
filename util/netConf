@@ -7,35 +7,25 @@ INITFAIL=3      #exit code on initialize walrus
 IPNOTFOUND=-2
 NOCONN=-1
 NOARGS=1
+HELP=2
 
-if [ $# -eq 0 ]; then
-	help
-    exit $NOARGS
+while getopts "hg:m:" opt; do
+     case $opt in
+         h) echo "Usage: `basename $0` options (-g gdi-ip) (-m memory value) -h for help"; exit $HELP;;
+		 g)gdiHost=$OPTARG;;
+		 m)memJava=$OPTARG;;
+     esac
+done
+
+if ( ! getopts "hg:m:" opt); then
+	echo "Default mode enabled\n GDI-host set to \"8.8.8.8\"\n max java memory: \"2048m\""
+	gdiHost="8.8.8.8"
+	memJava="2048m"	
 fi
+
 
 configFolder=~/configs
 mkdir $configFolder >>/dev/null 2>>/dev/null
-
-if(( "$1" != "0" ));
-then
-	gdiHost=$1
-else
-	gdiHost="8.8.8.8"
-fi
-
-if [[ ! -n $2 ]];
-then
-	memJava="2048m"
-else
-	if(( "$2" != "0" ));
-	then
-		memJava=$2
-	else
-		memJava="2048m"
-	fi
-fi
-
-
 iFaces=ifaces.lst
 touch $iFaces
 cd /etc/sysconfig/network-scripts
