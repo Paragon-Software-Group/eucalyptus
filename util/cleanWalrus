@@ -1,0 +1,33 @@
+#!/bin/sh
+
+configDir=~/configs
+listFile=$configDir/walrusList
+mkdir $configDir
+touch $listFile
+echo "Getting list about Walrus Services: "
+euca_conf --list-walruses 2>>/dev/null | sed "s/.*walrus-/walrus-/g" | sed "s/\t.*//g" > $listFile
+if (( $? != "0" ));
+then
+echo "Failed to get information about Walrus Services"
+else
+echo "Information will be written into $listFile"
+fi
+
+read -p "Are you sure to deregister all Walrus services (y/n)?" answer
+case "$answer" in
+"y")
+    ;;
+"n" )
+    echo "User abort the operation. exiting..."
+	exit 1
+    ;;
+*)
+	echo "Invalid option selected. exiting..."
+	exit 2
+    ;;
+esac
+for service in `cat $listFile`;
+do
+	echo "Deregistering $service"
+	euca_conf --deregister-walrus $service
+done
